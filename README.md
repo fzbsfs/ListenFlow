@@ -1,55 +1,75 @@
-# ListenFlow MVP（Windows 本地听读助手）
+# ListenFlow 本地听读助手
 
-这是一个离线优先的 Windows 桌面听读器原型，使用 Windows 已安装的 SAPI 语音，不集成云端 TTS 或 AI 语音服务。
+ListenFlow 是面向 Windows 的本地长文本听读工具。程序使用系统已安装、可由 SAPI 访问的语音，不接入在线语音、云端人工智能、在线文字识别、账号、遥测或云同步。
 
 ## 当前功能
 
-- 枚举系统已安装、可供 SAPI 使用的语音，优先选择 `Microsoft Xiaoxiao`
-- 打开 TXT 文件或粘贴剪贴板文字
-- 连续朗读长文本（自动按句读标点和长度切分）
-- 暂停、继续、停止
-- 调整 SAPI 语速（-10 到 +10）
-- 保存文章、语音选择、语速和当前字符位置
-- 下次启动时恢复上次文章与进度
-- 以 Windows x64 自包含单文件形式发布
-
-## 重要说明
-
-1. 本程序本身不调用网络接口，也不集成在线 TTS 或云端 AI。
-2. 朗读依赖 Windows 上已安装且能被 SAPI 访问的语音。你目前枚举到的 `Microsoft Xiaoxiao` 是优先选择项。
-3. “独立单文件 EXE”不代表把 Windows 语音引擎也塞进 EXE。目标电脑仍需要存在对应的系统语音。
-4. 第一次构建需要安装 .NET 8 SDK，并还原 `System.Speech` NuGet 包；发布完成后，朗读过程可以断网运行。
-5. 这是第一版 MVP，尚未实现 PDF/DOCX 解析、屏幕 OCR、系统托盘、全局快捷键或句子高亮。
-
-## 构建 EXE
-
-### 方式 A：双击批处理
-
-在已安装 .NET 8 SDK 的 Windows 电脑上，双击 `build-publish.bat`。
-
-发布产物位于：
-
-`publish\\ListenFlow.exe`
-
-### 方式 B：命令行
-
-在项目文件夹打开 PowerShell 或命令提示符，运行：
-
-```powershell
-dotnet publish ListenFlow.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o .\\publish
-```
+- 优先选择本机 `Microsoft Xiaoxiao` 中文语音，找不到时优先选择其他 `zh-CN` 本地语音。
+- 打开 TXT、粘贴剪贴板文本或直接编辑正文。
+- 按中文句读标点和安全字符边界切分长文，保留每段在原文中的字符偏移。
+- 异步连续朗读，界面在播放期间保持响应。
+- 播放、暂停、继续、停止、后退一句和前进一句。
+- 语速调整、字符进度、百分比进度和当前句子选中高亮。
+- 使用明确的就绪、朗读中、暂停、停止、完成和错误状态。
+- 隔离旧播放会话回调，停止或换文后旧回调不会推进新文章进度。
+- 自动保存正文、文件路径、阅读位置、语音和语速；状态文件使用临时文件替换并保留备份。
+- 保留最近 10 篇文章，每篇文章使用独立的本地状态文件。
+- 旧版进度文件迁移、损坏主状态的备份恢复和源 TXT 变化检测。
+- 单实例运行和最多保留 10 份的本地异常日志。
 
 ## 使用方法
 
-1. 运行 `publish\\ListenFlow.exe`。
-2. 确认“本地语音”下拉框选中了 `Microsoft Xiaoxiao`。
-3. 点击“打开 TXT”或“粘贴剪贴板”。
-4. 点击“从当前位置播放”。
-5. 暂停后可以继续；停止后进度会保存。
-6. 关闭再打开程序，会恢复上次的文章和阅读位置。
+1. 运行 `ListenFlow.exe`。
+2. 确认“本地语音”显示 `Microsoft Xiaoxiao（zh-CN）`，或选择其他本地语音。
+3. 打开 TXT、粘贴剪贴板文字，或直接输入正文。
+4. 点击“播放”。
+5. 使用暂停、继续、停止、后退一句和前进一句控制阅读位置。
+6. 从“最近文章”切换之前保存的内容和进度。
 
-## 阅读进度保存位置
+窗口快捷键：
 
-`%LOCALAPPDATA%\\ListenFlow\\progress.json`
+- `F5`：播放、暂停或继续。
+- `Esc`：停止。
+- `Alt+左方向键`：后退一句。
+- `Alt+右方向键`：前进一句。
 
-这是本机文件，包含最近文章文本和阅读位置。请注意：如果读取的是私人文档，该文件也会保存对应文本。
+## 本地数据与隐私
+
+默认数据目录为 `%LOCALAPPDATA%\ListenFlow`：
+
+- `progress.json`：当前文章、阅读位置和设置。
+- `progress.json.bak`：上一份有效状态备份。
+- `history`：最近文章的独立状态文件。
+- `logs`：仅在程序异常时写入的本地错误日志。
+
+状态文件包含文章正文。私人文档也会保存在这一本机目录中。设置环境变量 `LISTENFLOW_DATA_DIR` 可以把数据目录改到其他本地路径，主要用于便携运行和隔离测试。
+
+## 语音与离线边界
+
+- 自包含 `ListenFlow.exe` 包含运行该程序所需的 .NET 运行时，但不包含 Windows 语音包。
+- 目标电脑必须已经安装并启用可由 SAPI 访问的语音；`Microsoft Xiaoxiao` 是首选项。
+- Edge 浏览器的在线自然语音与本程序使用的 Windows SAPI 语音不是同一项能力。
+- 程序没有在线语音回退路径。语音缺失、初始化失败或音频设备异常时会显示本地错误。
+- 首次源码构建通常需要联网还原开发依赖；已经发布的程序朗读时不需要这些构建依赖。
+
+## 构建与测试
+
+需要 Windows x64 和 .NET 8 SDK。在项目目录运行：
+
+```powershell
+.\build-release.ps1
+```
+
+该脚本会关闭 .NET 命令行遥测，依次还原依赖、运行不需要真实音频设备的测试，并发布到 `publish\ListenFlow.exe`。
+
+若当前电脑已安装 `Microsoft Xiaoxiao` 且允许测试时播放声音，可运行包含真实语音集成测试的发布：
+
+```powershell
+.\build-release.ps1 -RunVoiceIntegrationTests
+```
+
+也可以双击 `build-publish.bat` 执行标准发布。
+
+## 当前边界
+
+第一版不包含 PDF、DOCX、EPUB、屏幕文字识别、全局快捷键、系统托盘、开机启动、在线更新或任何联网服务。当前句高亮使用文本框选区，适合确认阅读位置，但视觉效果仍有后续改进空间。

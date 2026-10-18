@@ -1,0 +1,8 @@
+bin/
+obj/
+publish/
+ListenFlow.Tests/bin/
+ListenFlow.Tests/obj/
+*.user
+*.suo
+TestResults/

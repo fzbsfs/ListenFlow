@@ -7,10 +7,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ListenFlow</AssemblyName>
     <RootNamespace>ListenFlow</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="System.Speech" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="ListenFlow.Tests\**\*.cs" />
   </ItemGroup>
 </Project>

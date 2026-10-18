@@ -1,65 +1,66 @@
-using System.Speech.Synthesis;
 using System.Text;
-using System.Text.Json;
-using System.Windows.Forms;
+using ListenFlow.Core;
+using ListenFlow.Speech;
+using ListenFlow.Storage;
 
 namespace ListenFlow;
 
 internal sealed class MainForm : Form
 {
-    private readonly SpeechSynthesizer _speech = new();
+    private static readonly string StatePath = Path.Combine(AppPaths.DataDirectory, "progress.json");
+
     private readonly TextBox _editor = new();
     private readonly ComboBox _voiceBox = new();
+    private readonly ComboBox _historyBox = new();
     private readonly NumericUpDown _rateBox = new();
     private readonly Label _statusLabel = new();
     private readonly Label _progressLabel = new();
+    private readonly ProgressBar _progressBar = new();
     private readonly Button _playButton = new();
     private readonly Button _pauseButton = new();
     private readonly Button _resumeButton = new();
     private readonly Button _stopButton = new();
+    private readonly Button _previousButton = new();
+    private readonly Button _nextButton = new();
+    private readonly ProgressStore _progressStore = new(StatePath);
+    private readonly RecentArticleStore _recentStore = new(Path.Combine(AppPaths.DataDirectory, "history"));
+    private readonly System.Windows.Forms.Timer _saveTimer = new() { Interval = 1000 };
 
-    private readonly string _statePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ListenFlow", "progress.json");
-
-    private List<TextChunk> _chunks = new();
+    private SapiSpeechService? _speechService;
+    private ReaderController? _reader;
+    private ReaderState? _restoredState;
     private string? _filePath;
-    private string _preferredVoice = "";
-    private int _characterPosition;
-    private int _playStartOffset;
-    private int _currentChunkIndex;
-    private bool _loadingState = true;
-    private bool _initializingVoices = true;
-    private bool _isSpeaking;
-    private bool _isPaused;
-    private bool _userStopped;
-    private bool _cancelPending;
+    private string _documentId = Guid.NewGuid().ToString("N");
+    private string _articleTitle = "未命名文章";
+    private bool _loading = true;
+    private bool _initializingVoices;
+    private bool _initializingHistory;
+    private bool _stateDirty;
+    private bool _documentNeedsSync;
     private bool _closing;
-
-    private static readonly char[] ChunkBreakChars =
-        ['。', '！', '？', '；', '.', '!', '?', ';', '\n', ' '];
 
     public MainForm()
     {
         Text = "ListenFlow · 本地听读助手";
-        Width = 1050;
-        Height = 720;
-        MinimumSize = new Size(760, 500);
+        Width = 1080;
+        Height = 740;
+        MinimumSize = new Size(780, 520);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Microsoft YaHei UI", 9F);
+        KeyPreview = true;
+
         BuildUi();
-
         LoadSavedState();
-        InitializeVoices();
+        InitializeSpeech();
 
-        _speech.SetOutputToDefaultAudioDevice();
-        _speech.SpeakProgress += SpeechOnSpeakProgress;
-        _speech.SpeakCompleted += SpeechOnSpeakCompleted;
-
-        _loadingState = false;
-        UpdateProgressLabel();
+        _saveTimer.Tick += (_, _) => SaveStateIfDirty();
+        _saveTimer.Start();
+        _loading = false;
+        RefreshHistory();
+        UpdateProgress();
         UpdateControls();
 
+        KeyDown += MainForm_KeyDown;
         FormClosing += MainForm_FormClosing;
     }
 
@@ -69,11 +70,12 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(10),
+            RowCount = 4,
+            Padding = new Padding(10)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         Controls.Add(root);
 
@@ -82,14 +84,28 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             AutoSize = true,
             WrapContents = true,
-            Padding = new Padding(0, 0, 0, 8),
+            Padding = new Padding(0, 0, 0, 8)
         };
-
         toolbar.Controls.Add(MakeButton("打开 TXT", (_, _) => OpenTextFile()));
         toolbar.Controls.Add(MakeButton("粘贴剪贴板", (_, _) => PasteClipboard()));
         toolbar.Controls.Add(MakeButton("清空", (_, _) => ClearText()));
+        toolbar.Controls.Add(new Label
+        {
+            Text = "最近文章：",
+            AutoSize = true,
+            Margin = new Padding(12, 8, 0, 0)
+        });
+        _historyBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _historyBox.Width = 210;
+        _historyBox.SelectedIndexChanged += HistorySelectionChanged;
+        toolbar.Controls.Add(_historyBox);
 
-        _playButton.Text = "从当前位置播放";
+        _previousButton.Text = "后退一句";
+        _previousButton.AutoSize = true;
+        _previousButton.Click += (_, _) => MoveBySentence(-1);
+        toolbar.Controls.Add(_previousButton);
+
+        _playButton.Text = "播放";
         _playButton.AutoSize = true;
         _playButton.Click += (_, _) => StartPlayback();
         toolbar.Controls.Add(_playButton);
@@ -109,6 +125,10 @@ internal sealed class MainForm : Form
         _stopButton.Click += (_, _) => StopPlayback();
         toolbar.Controls.Add(_stopButton);
 
+        _nextButton.Text = "前进一句";
+        _nextButton.AutoSize = true;
+        _nextButton.Click += (_, _) => MoveBySentence(1);
+        toolbar.Controls.Add(_nextButton);
         root.Controls.Add(toolbar, 0, 0);
 
         _editor.Dock = DockStyle.Fill;
@@ -119,63 +139,64 @@ internal sealed class MainForm : Form
         _editor.WordWrap = true;
         _editor.Font = new Font("Microsoft YaHei UI", 11F);
         _editor.HideSelection = false;
-        _editor.TextChanged += (_, _) =>
-        {
-            if (_loadingState) return;
-            if (_isSpeaking) StopPlayback();
-            _characterPosition = 0;
-            _chunks.Clear();
-            _statusLabel.Text = "文本已修改；播放进度已重置。";
-            UpdateProgressLabel();
-        };
+        _editor.TextChanged += EditorOnTextChanged;
         root.Controls.Add(_editor, 0, 1);
+
+        var progressPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 2,
+            Padding = new Padding(0, 8, 0, 0)
+        };
+        progressPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        progressPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _progressBar.Dock = DockStyle.Fill;
+        _progressBar.Maximum = 1000;
+        _progressBar.Height = 18;
+        _progressLabel.AutoSize = true;
+        _progressLabel.Margin = new Padding(10, 2, 0, 0);
+        progressPanel.Controls.Add(_progressBar, 0, 0);
+        progressPanel.Controls.Add(_progressLabel, 1, 0);
+        root.Controls.Add(progressPanel, 0, 2);
 
         var footer = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
             WrapContents = true,
-            Padding = new Padding(0, 8, 0, 0),
+            Padding = new Padding(0, 8, 0, 0)
         };
-
         footer.Controls.Add(new Label
         {
             Text = "本地语音：",
             AutoSize = true,
-            Margin = new Padding(3, 8, 0, 0),
+            Margin = new Padding(3, 8, 0, 0)
         });
-
         _voiceBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _voiceBox.Width = 220;
-        _voiceBox.SelectedIndexChanged += (_, _) => VoiceSelectionChanged();
+        _voiceBox.Width = 230;
+        _voiceBox.SelectedIndexChanged += VoiceSelectionChanged;
         footer.Controls.Add(_voiceBox);
-
         footer.Controls.Add(new Label
         {
-            Text = "语速（-10 慢 / +10 快）：",
+            Text = "语速（-10 至 +10）：",
             AutoSize = true,
-            Margin = new Padding(12, 8, 0, 0),
+            Margin = new Padding(12, 8, 0, 0)
         });
-
         _rateBox.Minimum = -10;
         _rateBox.Maximum = 10;
-        _rateBox.Value = 0;
         _rateBox.Width = 58;
         _rateBox.ValueChanged += (_, _) =>
         {
-            if (!_loadingState) SaveState();
+            if (_reader is not null) _reader.Rate = (int)_rateBox.Value;
+            MarkStateDirty();
         };
         footer.Controls.Add(_rateBox);
-
-        _progressLabel.AutoSize = true;
-        _progressLabel.Margin = new Padding(12, 8, 0, 0);
-        footer.Controls.Add(_progressLabel);
-
         _statusLabel.AutoSize = true;
-        _statusLabel.Margin = new Padding(3, 8, 0, 0);
+        _statusLabel.MaximumSize = new Size(620, 0);
+        _statusLabel.Margin = new Padding(12, 8, 0, 0);
         footer.Controls.Add(_statusLabel);
-
-        root.Controls.Add(footer, 0, 2);
+        root.Controls.Add(footer, 0, 3);
     }
 
     private static Button MakeButton(string text, EventHandler click)
@@ -185,144 +206,145 @@ internal sealed class MainForm : Form
             Text = text,
             AutoSize = true,
             Height = 32,
-            Margin = new Padding(3, 0, 3, 3),
+            Margin = new Padding(3, 0, 3, 3)
         };
         button.Click += click;
         return button;
     }
 
-    private void InitializeVoices()
+    private void LoadSavedState()
     {
-        _initializingVoices = true;
-        _voiceBox.Items.Clear();
-
-        try
+        var result = _progressStore.Load();
+        _restoredState = result.State;
+        if (_restoredState is null)
         {
-            foreach (InstalledVoice voice in _speech.GetInstalledVoices())
-            {
-                if (voice.Enabled)
-                    _voiceBox.Items.Add(voice.VoiceInfo.Name);
-            }
-        }
-        catch (Exception ex)
-        {
-            _statusLabel.Text = "读取本地语音失败：" + ex.Message;
-        }
-
-        string? preferred = null;
-        if (_voiceBox.Items.Count > 0)
-        {
-            for (int i = 0; i < _voiceBox.Items.Count; i++)
-            {
-                string name = _voiceBox.Items[i]?.ToString() ?? "";
-                if (string.Equals(name, _preferredVoice, StringComparison.OrdinalIgnoreCase))
-                {
-                    preferred = name;
-                    break;
-                }
-            }
-
-            if (preferred is null)
-            {
-                for (int i = 0; i < _voiceBox.Items.Count; i++)
-                {
-                    string name = _voiceBox.Items[i]?.ToString() ?? "";
-                    if (name.Contains("Xiaoxiao", StringComparison.OrdinalIgnoreCase))
-                    {
-                        preferred = name;
-                        break;
-                    }
-                }
-            }
-
-            if (preferred is null)
-            {
-                for (int i = 0; i < _voiceBox.Items.Count; i++)
-                {
-                    string name = _voiceBox.Items[i]?.ToString() ?? "";
-                    if (name.Contains("Huihui", StringComparison.OrdinalIgnoreCase))
-                    {
-                        preferred = name;
-                        break;
-                    }
-                }
-            }
-
-            _voiceBox.SelectedItem = preferred ?? _voiceBox.Items[0];
-            ApplySelectedVoice();
-        }
-        else
-        {
-            _statusLabel.Text = "没有发现可用的本地 SAPI 语音。";
-        }
-
-        _initializingVoices = false;
-    }
-
-    private void VoiceSelectionChanged()
-    {
-        if (_initializingVoices || _voiceBox.SelectedItem is null) return;
-        if (_isSpeaking)
-        {
-            _statusLabel.Text = "请先停止朗读，再切换语音。";
+            _statusLabel.Text = result.Warning ?? "欢迎使用。打开 TXT 或粘贴文章即可开始。";
             return;
         }
+
+        var text = _restoredState.Text;
+        var position = _restoredState.CharacterPosition;
+        _filePath = _restoredState.FilePath;
+        _documentId = _restoredState.DocumentId;
+        _articleTitle = _restoredState.Title;
+        if (!string.IsNullOrWhiteSpace(_filePath))
+        {
+            if (File.Exists(_filePath))
+            {
+                try
+                {
+                    var currentFileText = ReadTextFile(_filePath);
+                    if (!_restoredState.MatchesText(currentFileText))
+                    {
+                        text = currentFileText;
+                        position = 0;
+                        _statusLabel.Text = "源文件内容已变化，已载入新内容并重置阅读进度。";
+                    }
+                }
+                catch (Exception exception)
+                {
+                    _statusLabel.Text = "无法重新读取源文件，已使用上次保存的正文：" + exception.Message;
+                }
+            }
+            else
+            {
+                _statusLabel.Text = "原文件已移动或删除，已使用上次保存的正文副本。";
+            }
+        }
+
+        _editor.Text = text;
+        _rateBox.Value = Math.Clamp(_restoredState.Rate, (int)_rateBox.Minimum, (int)_rateBox.Maximum);
+        _restoredState = ReaderState.Create(
+            _articleTitle, text, position, _filePath, _restoredState.VoiceName, _restoredState.Rate, _documentId);
+        if (string.IsNullOrWhiteSpace(_statusLabel.Text))
+            _statusLabel.Text = result.Warning ?? "已恢复上次文章和阅读位置。";
+        else if (!string.IsNullOrWhiteSpace(result.Warning))
+            _statusLabel.Text += " " + result.Warning;
+    }
+
+    private void InitializeSpeech()
+    {
+        try
+        {
+            _speechService = new SapiSpeechService(SynchronizationContext.Current);
+            _reader = new ReaderController(_speechService, new TextChunker(), queueDepth: 3)
+            {
+                Rate = (int)_rateBox.Value
+            };
+            _reader.SetDocument(_editor.Text, _restoredState?.CharacterPosition ?? 0);
+            _reader.Changed += ReaderOnChanged;
+            InitializeVoices();
+        }
+        catch (Exception exception)
+        {
+            _speechService?.Dispose();
+            _speechService = null;
+            _reader = null;
+            _statusLabel.Text = "本地语音初始化失败：" + exception.Message;
+        }
+    }
+
+    private void InitializeVoices()
+    {
+        if (_speechService is null) return;
+        _initializingVoices = true;
+        _voiceBox.Items.Clear();
+        foreach (var voice in _speechService.Voices.Where(voice => voice.Enabled))
+            _voiceBox.Items.Add(new VoiceItem(voice.Name, voice.Culture));
+        if (_voiceBox.Items.Count == 0)
+        {
+            _statusLabel.Text = "没有发现已启用的本地 SAPI 语音。";
+            _initializingVoices = false;
+            return;
+        }
+
+        var preferredName = _restoredState?.VoiceName ?? string.Empty;
+        var items = _voiceBox.Items.Cast<VoiceItem>().ToArray();
+        var selected = items.FirstOrDefault(item =>
+                           string.Equals(item.Name, preferredName, StringComparison.OrdinalIgnoreCase))
+                       ?? items.FirstOrDefault(item =>
+                           item.Name.Contains("Microsoft Xiaoxiao", StringComparison.OrdinalIgnoreCase))
+                       ?? items.FirstOrDefault(item =>
+                           string.Equals(item.Culture, "zh-CN", StringComparison.OrdinalIgnoreCase))
+                       ?? items[0];
+        _voiceBox.SelectedItem = selected;
+        _initializingVoices = false;
         ApplySelectedVoice();
-        SaveState();
+    }
+
+    private void VoiceSelectionChanged(object? sender, EventArgs eventArgs)
+    {
+        if (_initializingVoices || _loading) return;
+        ApplySelectedVoice();
+        MarkStateDirty();
     }
 
     private void ApplySelectedVoice()
     {
-        if (_voiceBox.SelectedItem is null) return;
-        string name = _voiceBox.SelectedItem.ToString() ?? "";
+        if (_speechService is null || _voiceBox.SelectedItem is not VoiceItem selected) return;
         try
         {
-            _speech.SelectVoice(name);
-            _preferredVoice = name;
-            _statusLabel.Text = "已选择本机语音：" + name;
+            _speechService.SelectVoice(selected.Name);
+            _statusLabel.Text = "已选择本机语音：" + selected.Name + "（" + selected.Culture + "）";
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _statusLabel.Text = "无法选择语音：" + ex.Message;
+            _statusLabel.Text = "无法选择本地语音：" + exception.Message;
         }
     }
 
-    private void LoadSavedState()
+    private void EditorOnTextChanged(object? sender, EventArgs eventArgs)
     {
-        try
-        {
-            if (!File.Exists(_statePath))
-            {
-                _loadingState = false;
-                _statusLabel.Text = "欢迎使用。打开 TXT 或粘贴一篇文章即可开始。";
-                return;
-            }
-
-            var state = JsonSerializer.Deserialize<ReaderState>(File.ReadAllText(_statePath));
-            if (state is null)
-            {
-                _loadingState = false;
-                return;
-            }
-
-            _loadingState = true;
-            _editor.Text = state.Text ?? "";
-            _filePath = state.FilePath;
-            _characterPosition = Math.Clamp(state.CharacterPosition, 0, _editor.TextLength);
-            _preferredVoice = state.VoiceName ?? "";
-            _rateBox.Value = Math.Clamp(state.Rate, (int)_rateBox.Minimum, (int)_rateBox.Maximum);
-            _statusLabel.Text = _editor.TextLength > 0
-                ? "已恢复上次文章和阅读位置。"
-                : "欢迎使用。打开 TXT 或粘贴一篇文章即可开始。";
-        }
-        catch (Exception ex)
-        {
-            _statusLabel.Text = "恢复上次进度失败：" + ex.Message;
-        }
-        finally
-        {
-            _loadingState = false;
-        }
+        if (_loading) return;
+        if (_reader?.State is PlaybackState.Speaking or PlaybackState.Paused)
+            _reader.Stop();
+        _documentNeedsSync = true;
+        _filePath = null;
+        _articleTitle = "手动输入的文章";
+        _statusLabel.Text = "文本已修改，阅读进度已重置。";
+        MarkStateDirty();
+        UpdateProgress(0);
+        UpdateControls();
     }
 
     private void OpenTextFile()
@@ -331,391 +353,342 @@ internal sealed class MainForm : Form
         {
             Title = "打开本地文本",
             Filter = "文本文件 (*.txt)|*.txt|所有文件 (*.*)|*.*",
-            CheckFileExists = true,
+            CheckFileExists = true
         };
-
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
         try
         {
-            StopPlayback();
-            _loadingState = true;
-            using var reader = new StreamReader(dialog.FileName, Encoding.UTF8, true);
-            _editor.Text = reader.ReadToEnd();
-            _filePath = dialog.FileName;
-            _characterPosition = 0;
-            _chunks.Clear();
-            _loadingState = false;
+            SetDocument(ReadTextFile(dialog.FileName), dialog.FileName, Path.GetFileNameWithoutExtension(dialog.FileName));
             _statusLabel.Text = "已打开：" + Path.GetFileName(dialog.FileName);
-            UpdateProgressLabel();
-            SaveState();
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _loadingState = false;
-            MessageBox.Show(this, ex.Message, "打开文件失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, exception.Message, "打开文件失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private static string ReadTextFile(string path)
+    {
+        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
     }
 
     private void PasteClipboard()
     {
         try
         {
-            if (Clipboard.ContainsText())
-            {
-                _editor.Text = Clipboard.GetText();
-                _filePath = null;
-                _statusLabel.Text = "已粘贴剪贴板文本。";
-            }
-            else
+            if (!Clipboard.ContainsText())
             {
                 MessageBox.Show(this, "剪贴板中没有可读取的文本。", "提示",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
+            SetDocument(Clipboard.GetText(), null, "剪贴板文章");
+            _statusLabel.Text = "已粘贴剪贴板文本。";
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            MessageBox.Show(this, "读取剪贴板失败：" + ex.Message, "错误",
+            MessageBox.Show(this, "读取剪贴板失败：" + exception.Message, "错误",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
     private void ClearText()
     {
-        StopPlayback();
-        _loadingState = true;
-        _editor.Clear();
-        _loadingState = false;
-        _filePath = null;
-        _characterPosition = 0;
-        _chunks.Clear();
+        SetDocument(string.Empty, null, "未命名文章");
         _statusLabel.Text = "文本已清空。";
-        UpdateProgressLabel();
-        SaveState();
+    }
+
+    private void SetDocument(
+        string text,
+        string? filePath,
+        string title,
+        string? documentId = null,
+        int position = 0,
+        bool archiveCurrent = true)
+    {
+        if (archiveCurrent) ArchiveCurrentDocument();
+        _loading = true;
+        _editor.Text = text;
+        _documentId = documentId ?? Guid.NewGuid().ToString("N");
+        _loading = false;
+        _filePath = filePath;
+        _articleTitle = title;
+        _documentNeedsSync = false;
+        _reader?.SetDocument(text, position);
+        MarkStateDirty();
+        SaveStateIfDirty(updateHistory: true);
+        UpdateProgress();
+        UpdateControls();
+    }
+
+    private void HistorySelectionChanged(object? sender, EventArgs eventArgs)
+    {
+        if (_initializingHistory || _loading || _historyBox.SelectedItem is not HistoryItem item) return;
+        if (string.Equals(item.DocumentId, _documentId, StringComparison.Ordinal)) return;
+        var state = _recentStore.Load(item.DocumentId);
+        if (state is null)
+        {
+            _statusLabel.Text = "所选历史记录已损坏或不存在。";
+            RefreshHistory();
+            return;
+        }
+
+        ArchiveCurrentDocument();
+        _rateBox.Value = Math.Clamp(state.Rate, (int)_rateBox.Minimum, (int)_rateBox.Maximum);
+        SetDocument(
+            state.Text,
+            state.FilePath,
+            state.Title,
+            state.DocumentId,
+            state.CharacterPosition,
+            archiveCurrent: false);
+        SelectVoiceByName(state.VoiceName);
+        _statusLabel.Text = "已恢复最近文章：" + state.Title;
+    }
+
+    private void SelectVoiceByName(string voiceName)
+    {
+        var item = _voiceBox.Items.Cast<VoiceItem>().FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, voiceName, StringComparison.OrdinalIgnoreCase));
+        if (item is not null) _voiceBox.SelectedItem = item;
+    }
+
+    private void RefreshHistory()
+    {
+        _initializingHistory = true;
+        _historyBox.Items.Clear();
+        foreach (var state in _recentStore.LoadRecent())
+            _historyBox.Items.Add(new HistoryItem(state.DocumentId, state.Title, state.UpdatedAt));
+        var current = _historyBox.Items.Cast<HistoryItem>().FirstOrDefault(item => item.DocumentId == _documentId);
+        if (current is not null) _historyBox.SelectedItem = current;
+        _initializingHistory = false;
+    }
+
+    private void EnsureDocumentSynchronized()
+    {
+        if (!_documentNeedsSync) return;
+        _reader?.SetDocument(_editor.Text, 0);
+        _documentNeedsSync = false;
     }
 
     private void StartPlayback()
     {
-        if (_cancelPending)
+        if (_reader is null)
         {
-            _statusLabel.Text = "正在停止上一段语音，请稍后再试。";
+            MessageBox.Show(this, "本地语音尚未成功初始化。", "无法朗读",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
-
-        string text = _editor.Text;
-        if (string.IsNullOrWhiteSpace(text))
+        if (string.IsNullOrWhiteSpace(_editor.Text))
         {
-            MessageBox.Show(this, "请先打开 TXT 文件或粘贴需要朗读的文字。", "没有可朗读的文本",
+            MessageBox.Show(this, "请先打开 TXT 文件、粘贴或输入需要朗读的文字。", "没有可朗读的文本",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-
-        if (_isPaused)
-        {
-            ResumePlayback();
-            return;
-        }
-
-        if (_isSpeaking)
-        {
-            _statusLabel.Text = "正在朗读。需要暂停时请点击“暂停”。";
-            return;
-        }
-
-        if (_characterPosition >= text.Length)
-            _characterPosition = 0;
-
-        _chunks = BuildChunks(text);
-        _currentChunkIndex = _chunks.FindIndex(c => _characterPosition < c.Start + c.Text.Length);
-        if (_currentChunkIndex < 0) _currentChunkIndex = 0;
-
-        _userStopped = false;
-        _isPaused = false;
-        _isSpeaking = true;
-        _rateBox.Enabled = false;
-        _voiceBox.Enabled = false;
-        _statusLabel.Text = "正在使用本机语音朗读……";
-        SaveState();
-        PlayCurrentChunkFromPosition();
-        UpdateControls();
-    }
-
-    private void PlayCurrentChunkFromPosition()
-    {
-        if (_closing || !_isSpeaking || _isPaused) return;
-
-        if (_currentChunkIndex >= _chunks.Count)
-        {
-            FinishPlayback();
-            return;
-        }
-
-        var chunk = _chunks[_currentChunkIndex];
-        int offset = Math.Clamp(_characterPosition - chunk.Start, 0, chunk.Text.Length);
-        string remaining = chunk.Text[offset..];
-        if (string.IsNullOrWhiteSpace(remaining))
-        {
-            _currentChunkIndex++;
-            PlayCurrentChunkFromPosition();
-            return;
-        }
-
-        _playStartOffset = chunk.Start + offset;
-        try
-        {
-            _speech.Rate = (int)_rateBox.Value;
-            _speech.Volume = 100;
-            _speech.SpeakAsync(remaining);
-        }
-        catch (Exception ex)
-        {
-            _isSpeaking = false;
-            _statusLabel.Text = "启动朗读失败：" + ex.Message;
-            UpdateControls();
-        }
+        EnsureDocumentSynchronized();
+        _reader.Rate = (int)_rateBox.Value;
+        _reader.Play();
     }
 
     private void PausePlayback()
     {
-        if (!_isSpeaking || _isPaused) return;
-        try
-        {
-            _speech.Pause();
-            _isPaused = true;
-            _statusLabel.Text = "已暂停；阅读进度已保存。";
-            SaveState();
-            UpdateControls();
-        }
-        catch (Exception ex)
-        {
-            _statusLabel.Text = "暂停失败：" + ex.Message;
-        }
+        _reader?.Pause();
+        MarkStateDirty();
+        SaveStateIfDirty(updateHistory: true);
     }
 
-    private void ResumePlayback()
-    {
-        if (!_isSpeaking || !_isPaused) return;
-        try
-        {
-            _speech.Resume();
-            _isPaused = false;
-            _statusLabel.Text = "继续朗读……";
-            UpdateControls();
-        }
-        catch (Exception ex)
-        {
-            _statusLabel.Text = "继续朗读失败：" + ex.Message;
-        }
-    }
+    private void ResumePlayback() => _reader?.Resume();
 
     private void StopPlayback()
     {
-        bool wasSpeaking = _isSpeaking;
-        _userStopped = true;
-        _isSpeaking = false;
-        _isPaused = false;
+        _reader?.Stop();
+        MarkStateDirty();
+        SaveStateIfDirty(updateHistory: true);
+    }
 
-        if (wasSpeaking)
+    private void MoveBySentence(int direction)
+    {
+        if (_reader is null || string.IsNullOrEmpty(_editor.Text)) return;
+        EnsureDocumentSynchronized();
+        _reader.MoveBySentence(direction);
+        MarkStateDirty();
+        SaveStateIfDirty(updateHistory: true);
+    }
+
+    private void ReaderOnChanged(object? sender, ReaderChangedEventArgs eventArgs) =>
+        Ui(() => ApplyReaderChange(eventArgs));
+
+    private void ApplyReaderChange(ReaderChangedEventArgs eventArgs)
+    {
+        if (_closing) return;
+        _statusLabel.Text = eventArgs.State switch
         {
-            _cancelPending = true;
-            try { _speech.SpeakAsyncCancelAll(); }
-            catch { _cancelPending = false; }
-        }
-
-        _statusLabel.Text = "已停止；阅读位置已保存。";
-        SaveState();
+            PlaybackState.Ready => "准备就绪。",
+            PlaybackState.Speaking => "正在使用本机语音朗读……",
+            PlaybackState.Paused => "已暂停，阅读进度已保存。",
+            PlaybackState.Stopped => "已停止，阅读位置已保存。",
+            PlaybackState.Completed => "朗读完成。",
+            PlaybackState.Error => eventArgs.ErrorMessage ?? "朗读发生错误。",
+            _ => _statusLabel.Text
+        };
+        UpdateProgress(eventArgs.Position);
+        HighlightCurrentSentence(eventArgs);
+        MarkStateDirty();
         UpdateControls();
     }
 
-    private void SpeechOnSpeakProgress(object? sender, SpeakProgressEventArgs e)
+    private void HighlightCurrentSentence(ReaderChangedEventArgs eventArgs)
     {
-        if (_closing) return;
-        _characterPosition = Math.Clamp(_playStartOffset + e.CharacterPosition, 0, _editor.TextLength);
-        Ui(UpdateProgressLabel);
+        if (eventArgs.State is not (PlaybackState.Speaking or PlaybackState.Paused)) return;
+        var start = Math.Clamp(eventArgs.Sentence.Start, 0, _editor.TextLength);
+        var length = Math.Clamp(eventArgs.Sentence.Length, 0, _editor.TextLength - start);
+        _editor.SelectionStart = start;
+        _editor.SelectionLength = length;
+        _editor.ScrollToCaret();
     }
 
-    private void SpeechOnSpeakCompleted(object? sender, SpeakCompletedEventArgs e)
+    private void UpdateProgress(int? positionOverride = null)
     {
-        if (_closing) return;
-
-        Ui(() =>
-        {
-            if (_cancelPending)
-            {
-                _cancelPending = false;
-                if (_userStopped)
-                {
-                    UpdateControls();
-                    return;
-                }
-            }
-
-            if (_userStopped || !_isSpeaking)
-            {
-                UpdateControls();
-                return;
-            }
-
-            if (e.Error is not null)
-            {
-                _isSpeaking = false;
-                _isPaused = false;
-                _statusLabel.Text = "朗读发生错误：" + e.Error.Message;
-                SaveState();
-                UpdateControls();
-                return;
-            }
-
-            if (e.Cancelled)
-            {
-                _isSpeaking = false;
-                _isPaused = false;
-                _statusLabel.Text = "朗读已取消。";
-                SaveState();
-                UpdateControls();
-                return;
-            }
-
-            if (_currentChunkIndex < _chunks.Count)
-                _characterPosition = Math.Min(_editor.TextLength,
-                    _chunks[_currentChunkIndex].Start + _chunks[_currentChunkIndex].Text.Length);
-
-            _currentChunkIndex++;
-            SaveState();
-
-            if (_currentChunkIndex < _chunks.Count && _isSpeaking && !_isPaused)
-            {
-                PlayCurrentChunkFromPosition();
-            }
-            else
-            {
-                FinishPlayback();
-            }
-
-            UpdateProgressLabel();
-            UpdateControls();
-        });
-    }
-
-    private void FinishPlayback()
-    {
-        _isSpeaking = false;
-        _isPaused = false;
-        _characterPosition = _editor.TextLength;
-        _statusLabel.Text = "朗读完成。";
-        SaveState();
-        UpdateProgressLabel();
-        UpdateControls();
-    }
-
-    private static List<TextChunk> BuildChunks(string text)
-    {
-        const int maxChunkLength = 420;
-        var result = new List<TextChunk>();
-        int start = 0;
-
-        while (start < text.Length)
-        {
-            int end = Math.Min(start + maxChunkLength, text.Length);
-            if (end < text.Length)
-            {
-                int candidate = text.LastIndexOfAny(ChunkBreakChars, end - 1, end - start);
-                if (candidate > start + 100)
-                {
-                    end = candidate + 1;
-                }
-            }
-
-            if (end <= start) end = Math.Min(start + maxChunkLength, text.Length);
-            result.Add(new TextChunk(start, text[start..end]));
-            start = end;
-        }
-
-        return result;
-    }
-
-    private void UpdateProgressLabel()
-    {
-        int total = _editor.TextLength;
-        int current = Math.Clamp(_characterPosition, 0, total);
-        int percent = total == 0 ? 0 : (int)Math.Round(current * 100.0 / total);
+        var total = _editor.TextLength;
+        var current = Math.Clamp(positionOverride ?? (_documentNeedsSync ? 0 : _reader?.Position ?? 0), 0, total);
+        var percent = total == 0 ? 0 : (int)Math.Round(current * 100.0 / total);
+        _progressBar.Value = total == 0 ? 0 : Math.Clamp((int)Math.Round(current * 1000.0 / total), 0, 1000);
         _progressLabel.Text = $"进度：{current:N0}/{total:N0} 字（{percent}%）";
     }
 
     private void UpdateControls()
     {
-        if (_closing) return;
-        _playButton.Enabled = !_isSpeaking && !_cancelPending;
-        _pauseButton.Enabled = _isSpeaking && !_isPaused;
-        _resumeButton.Enabled = _isSpeaking && _isPaused;
-        _stopButton.Enabled = _isSpeaking || _isPaused;
-        _voiceBox.Enabled = !_isSpeaking;
-        _rateBox.Enabled = !_isSpeaking;
+        var state = _reader?.State ?? PlaybackState.Error;
+        var hasText = !string.IsNullOrWhiteSpace(_editor.Text);
+        var speaking = state == PlaybackState.Speaking;
+        var paused = state == PlaybackState.Paused;
+        _playButton.Enabled = _reader is not null && hasText && !speaking;
+        _pauseButton.Enabled = speaking;
+        _resumeButton.Enabled = paused;
+        _stopButton.Enabled = speaking || paused;
+        _previousButton.Enabled = _reader is not null && hasText && !speaking && !paused;
+        _nextButton.Enabled = _reader is not null && hasText && !speaking && !paused;
+        _voiceBox.Enabled = _speechService is not null && !speaking && !paused;
+        _historyBox.Enabled = !speaking && !paused;
+        _rateBox.Enabled = !speaking && !paused;
+        _editor.ReadOnly = speaking || paused;
     }
 
-    private void SaveState()
+    private void MarkStateDirty()
     {
-        if (_closing) return;
+        if (!_loading && !_closing) _stateDirty = true;
+    }
 
+    private ReaderState CreateCurrentState()
+    {
+        var position = _documentNeedsSync ? 0 : _reader?.Position ?? 0;
+        var voiceName = (_voiceBox.SelectedItem as VoiceItem)?.Name ?? _restoredState?.VoiceName ?? string.Empty;
+        return ReaderState.Create(
+            _articleTitle,
+            _editor.Text,
+            position,
+            _filePath,
+            voiceName,
+            (int)_rateBox.Value,
+            _documentId);
+    }
+
+    private void ArchiveCurrentDocument()
+    {
+        if (string.IsNullOrWhiteSpace(_editor.Text)) return;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
-            var state = new ReaderState
-            {
-                Text = _editor.Text,
-                FilePath = _filePath,
-                CharacterPosition = Math.Clamp(_characterPosition, 0, _editor.TextLength),
-                Rate = (int)_rateBox.Value,
-                VoiceName = _voiceBox.SelectedItem?.ToString() ?? _preferredVoice,
-            };
-            File.WriteAllText(_statePath, JsonSerializer.Serialize(state, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            }), Encoding.UTF8);
+            _recentStore.Save(CreateCurrentState());
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _statusLabel.Text = "保存阅读进度失败：" + ex.Message;
+            _statusLabel.Text = "保存最近文章失败：" + exception.Message;
         }
     }
 
-    private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
+    private void SaveStateIfDirty(bool updateHistory = false)
     {
+        if (!_stateDirty || _closing) return;
+        try
+        {
+            var state = CreateCurrentState();
+            _progressStore.Save(state);
+            if (updateHistory && !string.IsNullOrWhiteSpace(state.Text))
+            {
+                _recentStore.Save(state);
+                RefreshHistory();
+            }
+            _stateDirty = false;
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.Text = "保存阅读进度失败：" + exception.Message;
+        }
+    }
+
+    private void MainForm_KeyDown(object? sender, KeyEventArgs eventArgs)
+    {
+        if (eventArgs.KeyCode == Keys.F5)
+        {
+            if (_reader?.State == PlaybackState.Speaking) PausePlayback();
+            else if (_reader?.State == PlaybackState.Paused) ResumePlayback();
+            else StartPlayback();
+            eventArgs.Handled = true;
+        }
+        else if (eventArgs.KeyCode == Keys.Escape)
+        {
+            StopPlayback();
+            eventArgs.Handled = true;
+        }
+        else if (eventArgs.Alt && eventArgs.KeyCode == Keys.Left)
+        {
+            MoveBySentence(-1);
+            eventArgs.Handled = true;
+        }
+        else if (eventArgs.Alt && eventArgs.KeyCode == Keys.Right)
+        {
+            MoveBySentence(1);
+            eventArgs.Handled = true;
+        }
+    }
+
+    private void MainForm_FormClosing(object? sender, FormClosingEventArgs eventArgs)
+    {
+        _saveTimer.Stop();
+        _stateDirty = true;
+        SaveStateIfDirty(updateHistory: true);
         _closing = true;
-        try
+        if (_reader is not null)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
-            var state = new ReaderState
-            {
-                Text = _editor.Text,
-                FilePath = _filePath,
-                CharacterPosition = Math.Clamp(_characterPosition, 0, _editor.TextLength),
-                Rate = (int)_rateBox.Value,
-                VoiceName = _voiceBox.SelectedItem?.ToString() ?? _preferredVoice,
-            };
-            File.WriteAllText(_statePath, JsonSerializer.Serialize(state), Encoding.UTF8);
+            _reader.Changed -= ReaderOnChanged;
+            _reader.Dispose();
         }
-        catch { }
-
-        try { _speech.SpeakAsyncCancelAll(); } catch { }
-        _speech.Dispose();
+        else
+        {
+            _speechService?.Dispose();
+        }
     }
 
     private void Ui(Action action)
     {
         if (_closing || IsDisposed || !IsHandleCreated) return;
-        try { BeginInvoke(action); }
-        catch (InvalidOperationException) { }
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(action); }
+            catch (InvalidOperationException) { }
+            return;
+        }
+        action();
     }
 
-    private sealed record TextChunk(int Start, string Text);
-
-    private sealed class ReaderState
+    private sealed record VoiceItem(string Name, string Culture)
     {
-        public string? Text { get; set; }
-        public string? FilePath { get; set; }
-        public int CharacterPosition { get; set; }
-        public int Rate { get; set; }
-        public string? VoiceName { get; set; }
+        public override string ToString() => Name + "（" + Culture + "）";
+    }
+
+    private sealed record HistoryItem(string DocumentId, string Title, DateTimeOffset UpdatedAt)
+    {
+        public override string ToString() => Title;
     }
 }
