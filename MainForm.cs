@@ -267,7 +267,11 @@ internal sealed class MainForm : Form
         try
         {
             _speechService = new SapiSpeechService(SynchronizationContext.Current);
-            _reader = new ReaderController(_speechService, new TextChunker(), queueDepth: 3)
+            _reader = new ReaderController(
+                _speechService,
+                new TextChunker(),
+                queueDepth: 3,
+                stateContext: SynchronizationContext.Current)
             {
                 Rate = (int)_rateBox.Value
             };
