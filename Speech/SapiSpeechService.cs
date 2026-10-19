@@ -22,6 +22,11 @@ public sealed class SapiSpeechService : ISpeechService
                     voice.VoiceInfo.Name,
                     voice.VoiceInfo.Culture.Name,
                     voice.Enabled))
+                .GroupBy(voice => voice.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderByDescending(voice => voice.Enabled)
+                    .ThenBy(voice => voice.Culture, StringComparer.OrdinalIgnoreCase)
+                    .First())
                 .ToArray();
         }
         catch
