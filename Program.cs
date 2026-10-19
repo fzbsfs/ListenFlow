@@ -1,16 +1,19 @@
+using ListenFlow.Communication;
 using ListenFlow.Diagnostics;
+using ListenFlow.Protocol;
 
 namespace ListenFlow;
 
 internal static class Program
 {
-    private const string InstanceMutexName = "Local\\ListenFlow.Desktop.Singleton.7E5E7364";
-
     [STAThread]
     private static void Main()
     {
         ApplicationConfiguration.Initialize();
-        using var instanceMutex = new Mutex(initiallyOwned: true, InstanceMutexName, out var isFirstInstance);
+        using var instanceMutex = new Mutex(
+            initiallyOwned: true,
+            ProtocolConstants.DesktopMutexName,
+            out var isFirstInstance);
         if (!isFirstInstance)
         {
             MessageBox.Show(
@@ -39,7 +42,27 @@ internal static class Program
 
         try
         {
-            Application.Run(new MainForm());
+            using var form = new MainForm();
+            DesktopCommandRouter? router = null;
+            DesktopPipeServer? pipeServer = null;
+            form.Shown += (_, _) =>
+            {
+                var context = SynchronizationContext.Current
+                              ?? throw new InvalidOperationException("未取得桌面状态线程。");
+                router = new DesktopCommandRouter(form, context);
+                pipeServer = new DesktopPipeServer(
+                    router,
+                    log: (contextMessage, exception) =>
+                    {
+                        if (exception is not null)
+                            AppLog.WriteException(contextMessage, exception);
+                    });
+                pipeServer.Start();
+            };
+            Application.Run(form);
+            if (pipeServer is not null)
+                pipeServer.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            router?.Dispose();
         }
         catch (Exception exception)
         {

@@ -1,11 +1,12 @@
 using System.Text;
+using ListenFlow.Communication;
 using ListenFlow.Core;
 using ListenFlow.Speech;
 using ListenFlow.Storage;
 
 namespace ListenFlow;
 
-internal sealed class MainForm : Form
+internal sealed class MainForm : Form, IRemotePlaybackTarget
 {
     private static readonly string StatePath = Path.Combine(AppPaths.DataDirectory, "progress.json");
 
@@ -38,6 +39,8 @@ internal sealed class MainForm : Form
     private bool _stateDirty;
     private bool _documentNeedsSync;
     private bool _closing;
+
+    public event EventHandler<ReaderChangedEventArgs>? PlaybackChanged;
 
     public MainForm()
     {
@@ -540,6 +543,7 @@ internal sealed class MainForm : Form
         HighlightCurrentSentence(eventArgs);
         MarkStateDirty();
         UpdateControls();
+        PlaybackChanged?.Invoke(this, eventArgs);
     }
 
     private void HighlightCurrentSentence(ReaderChangedEventArgs eventArgs)
@@ -684,6 +688,55 @@ internal sealed class MainForm : Form
             return;
         }
         action();
+    }
+
+    int IRemotePlaybackTarget.TextLength => _editor.TextLength;
+    string IRemotePlaybackTarget.Text => _editor.Text;
+    PlaybackState IRemotePlaybackTarget.PlaybackState => _reader?.State ?? PlaybackState.Error;
+    long IRemotePlaybackTarget.PlaybackGeneration => _reader?.Generation ?? 0;
+
+    void IRemotePlaybackTarget.Start(RemoteStartRequest request)
+    {
+        if (_reader is null || _speechService is null)
+            throw new InvalidOperationException("本地语音尚未成功初始化。");
+        if (string.IsNullOrWhiteSpace(request.Text))
+            throw new InvalidOperationException("网页正文为空。");
+
+        if (!string.IsNullOrWhiteSpace(request.VoiceName))
+        {
+            var voice = _voiceBox.Items.Cast<VoiceItem>().FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, request.VoiceName, StringComparison.OrdinalIgnoreCase));
+            if (voice is null)
+                throw new InvalidOperationException("本机不存在指定语音：" + request.VoiceName);
+            _voiceBox.SelectedItem = voice;
+            _speechService.SelectVoice(voice.Name);
+        }
+
+        if (request.Rate is not null)
+            _rateBox.Value = Math.Clamp(request.Rate.Value, (int)_rateBox.Minimum, (int)_rateBox.Maximum);
+
+        SetDocument(
+            request.Text,
+            filePath: null,
+            request.Title,
+            documentId: $"web:{request.SessionId}:{request.SnapshotId}:{request.SnapshotVersion}",
+            position: request.Offset);
+        _reader.Rate = (int)_rateBox.Value;
+        _reader.SeekAndPlay(request.Offset);
+    }
+
+    void IRemotePlaybackTarget.Pause() => PausePlayback();
+    void IRemotePlaybackTarget.Resume() => ResumePlayback();
+    void IRemotePlaybackTarget.Stop() => StopPlayback();
+
+    void IRemotePlaybackTarget.Seek(int offset)
+    {
+        if (_reader is null)
+            throw new InvalidOperationException("本地语音尚未成功初始化。");
+        EnsureDocumentSynchronized();
+        _reader.SeekTo(offset);
+        MarkStateDirty();
+        SaveStateIfDirty(updateHistory: true);
     }
 
     private sealed record VoiceItem(string Name, string Culture)

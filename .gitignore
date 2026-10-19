@@ -1,8 +1,8 @@
-bin/
-obj/
+**/bin/
+**/obj/
+.dotnet-home/
 publish/
-ListenFlow.Tests/bin/
-ListenFlow.Tests/obj/
+test-artifacts/
+restore-diag.log
 *.user
 *.suo
-TestResults/

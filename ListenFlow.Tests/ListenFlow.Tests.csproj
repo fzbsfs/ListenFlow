@@ -16,6 +16,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ListenFlow.csproj" />
+    <ProjectReference Include="..\ListenFlow.Protocol\ListenFlow.Protocol.csproj" />
+    <ProjectReference Include="..\ListenFlow.NativeHost\ListenFlow.NativeHost.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
