@@ -85,11 +85,25 @@ try {
     $packaging = Join-Path $PSScriptRoot "Packaging\EdgeTest"
     Copy-Item -LiteralPath (Join-Path $packaging "Install-ListenFlow.ps1") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $packaging "Uninstall-ListenFlow.ps1") -Destination $packageStage
-    Copy-Item -LiteralPath (Join-Path $packaging "安装 ListenFlow.cmd") -Destination $packageStage
-    Copy-Item -LiteralPath (Join-Path $packaging "卸载 ListenFlow.cmd") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $packaging "人工验收说明.txt") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $packaging "Uninstall-ListenFlow.ps1") -Destination $payloadTools
-    Copy-Item -LiteralPath (Join-Path $packaging "已安装版本卸载.cmd") -Destination (Join-Path $packageStage "payload\卸载 ListenFlow.cmd")
+
+    $cmdCopies = [ordered]@{
+        "安装 ListenFlow.cmd" = Join-Path $packageStage "安装 ListenFlow.cmd"
+        "卸载 ListenFlow.cmd" = Join-Path $packageStage "卸载 ListenFlow.cmd"
+        "已安装版本卸载.cmd" = Join-Path $packageStage "payload\卸载 ListenFlow.cmd"
+    }
+    $ascii = [Text.Encoding]::ASCII
+    foreach ($cmdCopy in $cmdCopies.GetEnumerator()) {
+        $sourceCmd = Join-Path $packaging $cmdCopy.Key
+        $cmdText = [IO.File]::ReadAllText($sourceCmd)
+        if ($cmdText.ToCharArray() | Where-Object { [int]$_ -gt 127 }) {
+            throw "CMD 入口必须只包含 ASCII 字符：$sourceCmd"
+        }
+        $cmdLines = $cmdText -split "\r\n|\n|\r"
+        $normalizedCmd = (($cmdLines | Where-Object { $_ -ne "" }) -join "`r`n") + "`r`n"
+        [IO.File]::WriteAllText([string]$cmdCopy.Value, $normalizedCmd, $ascii)
+    }
 
     Write-Host "[6/7] 生成构建信息与 SHA256 校验"
     $commit = (& git -C $PSScriptRoot rev-parse HEAD).Trim()

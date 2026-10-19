@@ -29,6 +29,18 @@ function Get-ExtensionId([string]$PublicKey) {
     return $builder.ToString()
 }
 
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($hash)).Replace("-", "")
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Assert-PackageChecksums {
     if (-not (Test-Path -LiteralPath $checksumsPath)) {
         throw "安装包缺少 checksums.json。"
@@ -43,7 +55,7 @@ function Assert-PackageChecksums {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             throw "安装包文件缺失：$($entry.path)"
         }
-        $actual = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash
+        $actual = Get-Sha256 $candidate
         if (-not $actual.Equals([string]$entry.sha256, [StringComparison]::OrdinalIgnoreCase)) {
             throw "安装包文件校验失败：$($entry.path)"
         }
@@ -64,21 +76,36 @@ function Stop-InstalledProcesses([string[]]$ExecutablePaths) {
     }
 }
 
+function Stop-RunningDesktopApp([string]$TargetExecutablePath) {
+    $targetFull = [IO.Path]::GetFullPath($TargetExecutablePath)
+    foreach ($runningApp in @(Get-Process -Name "ListenFlow" -ErrorAction SilentlyContinue)) {
+        $runningPath = $null
+        try { $runningPath = [IO.Path]::GetFullPath($runningApp.MainModule.FileName) } catch {
+        }
+        if (-not $runningPath -or
+            -not [string]::Equals($runningPath, $targetFull, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "请先正常关闭其他位置正在运行的 ListenFlow，再安装人工验收版。进程号：$($runningApp.Id)"
+        }
+
+        for ($attempt = 0; $attempt -lt 20 -and -not $runningApp.HasExited; $attempt++) {
+            $runningApp.Refresh()
+            if ($runningApp.MainWindowHandle -ne [IntPtr]::Zero) {
+                [void]$runningApp.CloseMainWindow()
+                break
+            }
+            [Threading.Thread]::Sleep(250)
+        }
+        if (-not $runningApp.HasExited -and -not $runningApp.WaitForExit(5000)) {
+            Stop-Process -Id $runningApp.Id -Force -ErrorAction Stop
+            $runningApp.WaitForExit(5000)
+        }
+    }
+}
+
 if (-not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     throw "安装包缺少 payload 目录。"
 }
 Assert-PackageChecksums
-
-foreach ($runningApp in @(Get-Process -Name "ListenFlow" -ErrorAction SilentlyContinue)) {
-    try {
-        [void]$runningApp.CloseMainWindow()
-        if (-not $runningApp.WaitForExit(5000)) {
-            throw "ListenFlow 仍在运行。"
-        }
-    } catch {
-        throw "请先正常关闭正在运行的 ListenFlow，再重新安装人工验收版。进程号：$($runningApp.Id)"
-    }
-}
 
 $sourceManifestPath = Join-Path $payloadRoot "extension\manifest.json"
 $sourceAppPath = Join-Path $payloadRoot "app\ListenFlow.exe"
@@ -124,6 +151,7 @@ if (Test-Path -LiteralPath $RegistryPath) {
 
 $installedApp = Join-Path $installFull "app\ListenFlow.exe"
 $installedHost = Join-Path $installFull "app\ListenFlow.NativeHost.exe"
+Stop-RunningDesktopApp $installedApp
 Stop-InstalledProcesses @($installedApp, $installedHost)
 
 try {
@@ -217,14 +245,22 @@ Write-Host "2. 点击“加载解压缩的扩展”，选择：$installedExtensi
 Write-Host "3. 确认扩展标识为：$expectedExtensionId"
 
 if (-not $SkipEdgeLaunch) {
-    $edgeCandidates = @(
+    $edgeCandidates = @(@(
         (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
         (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
     if ($edgeCandidates.Count -gt 0) {
-        Start-Process -FilePath $edgeCandidates[0] -ArgumentList "edge://extensions/"
+        try {
+            Start-Process -FilePath $edgeCandidates[0] -ArgumentList "edge://extensions/"
+        } catch {
+            Write-Warning "无法自动打开 Edge 扩展页，请手动打开 edge://extensions/。$($_.Exception.Message)"
+        }
     } else {
         Write-Warning "未找到 Microsoft Edge，请手动打开 edge://extensions/。"
     }
-    Start-Process -FilePath "explorer.exe" -ArgumentList @($installedExtension)
+    try {
+        Start-Process -FilePath "explorer.exe" -ArgumentList @($installedExtension)
+    } catch {
+        Write-Warning "无法自动打开扩展目录，请手动选择：$installedExtension"
+    }
 }

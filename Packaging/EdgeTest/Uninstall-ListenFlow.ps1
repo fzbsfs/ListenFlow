@@ -104,11 +104,15 @@ Write-Host "ListenFlow 程序和 Native Messaging Host 注册已移除。"
 Write-Host "请在 Edge 的 edge://extensions/ 页面移除“ListenFlow 网页听读”扩展。"
 
 if (-not $SkipEdgeLaunch) {
-    $edgeCandidates = @(
+    $edgeCandidates = @(@(
         (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
         (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
     if ($edgeCandidates.Count -gt 0) {
-        Start-Process -FilePath $edgeCandidates[0] -ArgumentList "edge://extensions/"
+        try {
+            Start-Process -FilePath $edgeCandidates[0] -ArgumentList "edge://extensions/"
+        } catch {
+            Write-Warning "无法自动打开 Edge 扩展页，请手动打开 edge://extensions/。$($_.Exception.Message)"
+        }
     }
 }

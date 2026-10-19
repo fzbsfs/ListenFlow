@@ -92,6 +92,8 @@ Edge 扩展的加载、注册和验证方法见 [Edge 扩展说明](EdgeExtensio
 
 输出目录为 `artifacts\ListenFlow-0.2.0-Edge人工验收-x64`，压缩包为同名 ZIP。解压后双击“安装 ListenFlow.cmd”；程序默认安装到 `%LOCALAPPDATA%\Programs\ListenFlow-EdgeTest`，不需要管理员权限，也不修改默认浏览器。Edge 出于安全限制仍要求用户在 `edge://extensions/` 中手动加载一次 `%LOCALAPPDATA%\Programs\ListenFlow-EdgeTest\extension`。完整步骤见 [Edge 人工验收安装与回退说明](docs/Edge人工验收安装与回退说明.md)。
 
+安装入口的 CMD 编码、换行和重复安装回归见 [Edge 人工验收安装脚本修复报告](docs/Edge人工验收安装脚本修复报告.md)。
+
 ## 当前边界
 
 Edge 扩展当前只支持允许内容脚本运行的普通 `http` 和 `https` 页面。浏览器内部页、扩展商店及禁止注入的页面不支持；正文动态变化时会停止会话，暂不做模糊重映射。原生右键菜单仍需完成一次人工点选验收后才能标记为最终通过。
