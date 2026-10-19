@@ -1,0 +1,9 @@
+{
+  "name": "com.listenflow.native_host",
+  "description": "ListenFlow 本地离线听读通信宿主",
+  "path": "__HOST_EXECUTABLE__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://chdkljcgemgeljdnfdnblbelfhmkkfbp/"
+  ]
+}

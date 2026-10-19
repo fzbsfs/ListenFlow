@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>ListenFlow Edge 闭环测试页</title>
+  <style>
+    body { margin: 0; font: 18px/1.9 "Microsoft YaHei UI", sans-serif; color: #222; background: #f3f5f7; }
+    main { width: min(850px, calc(100% - 40px)); margin: 30px auto; padding: 32px 48px; background: #fff; box-shadow: 0 3px 20px #0002; }
+    h1 { line-height: 1.3; }
+    p { margin: 1.2em 0; }
+    .controls { padding: 14px; background: #eef5ff; border-radius: 8px; }
+    input { width: 260px; padding: 8px; }
+    button { padding: 8px 16px; }
+  </style>
+</head>
+<body>
+  <nav>测试导航栏：这段内容不应作为主要正文。</nav>
+  <main role="main">
+    <article>
+      <h1>ListenFlow 网页原文高亮闭环测试</h1>
+      <p id="paragraph-1">第一段用于启动测试。这里包含清晰的中文句子。朗读开始后，当前句子应直接在这一段原文上高亮。</p>
+      <p id="paragraph-2">第二段用于连续播放测试。Microsoft Xiaoxiao 的真实语音进度会从本机程序返回。扩展收到进度后，应把对应的句子映射回原始文字节点。</p>
+      <p id="paragraph-3">第三段用于鼠标点击定位测试。请在朗读其他段落时，左键点击本段中间的“点击定位目标”几个字。旧声音应立即停止，并从点击位置附近重新开始朗读。</p>
+      <p id="paragraph-4">第四段用于连续点击测试。先点击这一句，再快速点击下一句，最后点击本段末尾。只有最后一次定位对应的声音和高亮可以继续推进。</p>
+      <p id="paragraph-5">第五段用于暂停定位测试。暂停以后点击这一段的文字，不应提前发声。继续以后，应从新位置开始，并让高亮继续跟随真实进度。</p>
+      <div class="controls">
+        <a id="test-link" href="#link-target">这是测试链接，左键点击时不应被指读模式拦截</a>
+        <br>
+        <button id="test-button" type="button">这是测试按钮</button>
+        <input id="test-input" value="输入框中的正常操作不应被拦截">
+      </div>
+      <p id="paragraph-6">第六段用于停止测试。停止以后，高亮应被清除，声音和播放进度都不应继续推进。</p>
+      <p id="paragraph-7">第七段包含 English API、数字 12345、网址示例 https://example.invalid/path，以及表情符号🙂。这些字符用于检查 UTF-16 偏移映射是否稳定。</p>
+      <p id="paragraph-8">第八段是结尾。完成本页测试后，应关闭测试浏览器并移除临时 Native Messaging 注册。</p>
+      <div id="link-target">链接目标</div>
+    </article>
+  </main>
+  <aside>测试侧栏：这段文字应被正文提取器排除。</aside>
+  <script>
+    document.getElementById("test-button").addEventListener("click", () => {
+      document.getElementById("test-button").textContent = "按钮点击正常";
+    });
+  </script>
+</body>
+</html>
