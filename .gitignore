@@ -2,6 +2,7 @@
 **/obj/
 .dotnet-home/
 publish/
+artifacts/
 test-artifacts/
 restore-diag.log
 *.user
