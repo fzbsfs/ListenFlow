@@ -7,14 +7,19 @@
   const dom = global.ListenFlowDomSnapshot;
   const interactiveSelector = [
     "a", "button", "input", "textarea", "select", "option", "label", "summary",
-    "[contenteditable='true']", "[role='button']", "[role='link']", "[role='menuitem']"
+    "[role='button']", "[role='link']", "[role='menuitem']", "[role='toolbar']"
   ].join(",");
+  const editableSelector = "[contenteditable]:not([contenteditable='false'])";
 
   let active = null;
   let lastContextSelection = null;
   let toastTimer = null;
+  let pointerGesture = null;
 
   document.addEventListener("contextmenu", rememberContextSelection, true);
+  document.addEventListener("pointerdown", rememberPointerDown, true);
+  document.addEventListener("pointermove", rememberPointerMove, true);
+  document.addEventListener("pointerup", rememberPointerUp, true);
   document.addEventListener("click", handleReadingClick, true);
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void handleExtensionMessage(message).then(
@@ -94,6 +99,8 @@
 
   async function sendControl(type) {
     if (!active) throw new Error("当前网页没有活动的 ListenFlow 朗读会话。");
+    if (type === "resume" && active.pending)
+      return startPendingSnapshot();
     const command = {
       version: 1,
       type,
@@ -175,24 +182,152 @@
   function handleReadingClick(event) {
     if (!active || event.button !== 0 || event.defaultPrevented) return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.detail > 1 || pointerGesture?.moved) return;
     if (event.target instanceof Element && event.target.closest(interactiveSelector)) return;
-    const offset = dom.locatePoint(active.snapshot, event.clientX, event.clientY);
-    if (offset == null) return;
+    const selection = getSelection();
+    if (selection && !selection.isCollapsed) return;
+    const navigationSnapshot = active.pending?.snapshot ?? active.snapshot;
+    if (event.target instanceof Element && event.target.closest(editableSelector) &&
+        !dom.isEditableTargetAllowed(navigationSnapshot, event.target)) return;
+    const target = dom.resolveReadingTarget(navigationSnapshot, event.clientX, event.clientY);
+    if (!target) return;
 
-    event.preventDefault();
-    event.stopImmediatePropagation();
+    if (active.state === "paused" && (active.pending || target.expanded)) {
+      setPendingTarget(target.snapshot, target.offset);
+      return;
+    }
+    if (target.expanded) {
+      void startReplacementSnapshot(target.snapshot, target.offset)
+        .catch(error => showToast("定位失败：" + error.message));
+      return;
+    }
+
+    highlightSnapshotRange(navigationSnapshot, active.pending?.highlighter ?? active.highlighter, target.offset);
     const command = {
       version: 1,
       type: "seek",
+      requestId: crypto.randomUUID(),
+      sessionId: active.sessionId,
+      snapshotId: active.pending?.snapshotId ?? active.snapshotId,
+      snapshotVersion: active.pending?.snapshotVersion ?? active.snapshotVersion,
+      commandSeq: ++active.commandSeq,
+      offsetEncoding: "utf-16",
+      offset: target.offset
+    };
+    void forwardCommand(command).catch(error => showToast("定位失败：" + error.message));
+  }
+
+  function setPendingTarget(snapshot, offset) {
+    if (!active) return;
+    if (active.pending?.snapshot !== snapshot) {
+      active.pending?.highlighter?.clear();
+      active.highlighter?.clear();
+      active.pending = {
+        snapshot,
+        snapshotId: crypto.randomUUID(),
+        snapshotVersion: Date.now(),
+        offset,
+        highlighter: new global.ListenFlowHighlighter(snapshot)
+      };
+    } else {
+      active.pending.offset = offset;
+    }
+    highlightSnapshotRange(snapshot, active.pending.highlighter, offset);
+    emitDiagnostic("edge-paused-target-pending", {
+      offset,
+      textLength: snapshot.text.length,
+      nodeCount: snapshot.runs.length
+    });
+  }
+
+  async function startPendingSnapshot() {
+    if (!active?.pending) return;
+    const pending = active.pending;
+    promoteSnapshot(pending);
+    await sendStartForActive(pending.offset);
+  }
+
+  async function startReplacementSnapshot(snapshot, offset) {
+    if (!active) return;
+    active.highlighter?.clear();
+    const replacement = {
+      snapshot,
+      snapshotId: crypto.randomUUID(),
+      snapshotVersion: Date.now(),
+      offset,
+      highlighter: new global.ListenFlowHighlighter(snapshot)
+    };
+    highlightSnapshotRange(snapshot, replacement.highlighter, offset);
+    promoteSnapshot(replacement);
+    await sendStartForActive(offset);
+  }
+
+  function promoteSnapshot(replacement) {
+    if (!active) return;
+    active.observer?.disconnect();
+    if (active.highlighter !== replacement.highlighter)
+      active.highlighter?.clear();
+    if (active.pending && active.pending !== replacement && active.pending.highlighter !== replacement.highlighter)
+      active.pending.highlighter?.clear();
+    active.snapshot = replacement.snapshot;
+    active.snapshotId = replacement.snapshotId;
+    active.snapshotVersion = replacement.snapshotVersion;
+    active.highlighter = replacement.highlighter;
+    active.runNodes = new Set(replacement.snapshot.runs.map(run => run.node));
+    active.pending = null;
+    active.state = "starting";
+    active.generation = -1;
+    active.hasProgress = false;
+    active.hasHighlighted = true;
+    observeSnapshot(active);
+  }
+
+  async function sendStartForActive(offset) {
+    if (!active) return;
+    const command = {
+      version: 1,
+      type: "start",
       requestId: crypto.randomUUID(),
       sessionId: active.sessionId,
       snapshotId: active.snapshotId,
       snapshotVersion: active.snapshotVersion,
       commandSeq: ++active.commandSeq,
       offsetEncoding: "utf-16",
-      offset
+      offset,
+      text: active.snapshot.text,
+      title: active.snapshot.title,
+      sourceUri: location.href,
+      voiceName: "Microsoft Xiaoxiao"
     };
-    void forwardCommand(command).catch(error => showToast("定位失败：" + error.message));
+    emitDiagnostic("edge-snapshot-replaced", {
+      offset,
+      textLength: active.snapshot.text.length,
+      nodeCount: active.snapshot.runs.length,
+      source: active.snapshot.source
+    });
+    await forwardCommand(command);
+  }
+
+  function highlightSnapshotRange(snapshot, highlighter, offset) {
+    if (!snapshot || !highlighter || offset < 0 || offset >= snapshot.text.length) return;
+    const sentence = core.findSentenceRange(snapshot.text, offset);
+    highlighter.set(sentence.start, sentence.length);
+  }
+
+  function rememberPointerDown(event) {
+    if (event.button !== 0) return;
+    pointerGesture = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+  }
+
+  function rememberPointerMove(event) {
+    if (!pointerGesture || event.pointerId !== pointerGesture.pointerId) return;
+    if (Math.hypot(event.clientX - pointerGesture.x, event.clientY - pointerGesture.y) > 5)
+      pointerGesture.moved = true;
+  }
+
+  function rememberPointerUp(event) {
+    if (!pointerGesture || event.pointerId !== pointerGesture.pointerId) return;
+    // 保留到紧随 pointerup 的 click；下一次 pointerdown 会覆盖。
   }
 
   function rememberContextSelection() {
@@ -268,6 +403,7 @@
     if (active) {
       active.observer?.disconnect();
       active.highlighter?.clear();
+      active.pending?.highlighter?.clear();
     }
     active = null;
     if (message) showToast(message);

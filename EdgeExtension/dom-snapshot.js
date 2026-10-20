@@ -25,7 +25,11 @@
       start: node === range.startContainer ? range.startOffset : 0,
       end: node === range.endContainer ? range.endOffset : node.data.length
     })).filter(item => item.end > item.start);
-    return buildSnapshotFromSlices(slices, "selection", commonAncestorElement(range), document.title);
+    const snapshot = buildSnapshotFromSlices(slices, "selection", commonAncestorElement(range), document.title);
+    const scope = navigationScopeForSelection(range);
+    snapshot.navigationRoot = scope?.root ?? null;
+    snapshot.navigationScopeKind = scope?.kind ?? null;
+    return snapshot;
   }
 
   function buildArticleSnapshot() {
@@ -127,6 +131,57 @@
   }
 
   function locatePoint(snapshot, x, y) {
+    const position = textPositionAtPoint(x, y);
+    return position ? offsetForPosition(snapshot, position) : null;
+  }
+
+  function resolveReadingTarget(snapshot, x, y) {
+    const position = textPositionAtPoint(x, y);
+    if (!position) return null;
+    const offset = offsetForPosition(snapshot, position);
+    if (offset != null) return { snapshot, offset, expanded: false };
+
+    // 只有选区会话允许按明确的同一文档范围扩展，不根据相同文字猜测位置。
+    const root = snapshot.navigationRoot;
+    if (snapshot.source !== "selection" || !root?.isConnected || !root.contains(position.node))
+      return null;
+    const slices = readableTextNodes(root).map(node => ({ node, start: 0, end: node.data.length }));
+    const expandedSnapshot = buildSnapshotFromSlices(slices, "document", root, snapshot.title);
+    expandedSnapshot.navigationRoot = root;
+    expandedSnapshot.navigationScopeKind = snapshot.navigationScopeKind;
+    const expandedOffset = offsetForPosition(expandedSnapshot, position);
+    return expandedOffset == null ? null : { snapshot: expandedSnapshot, offset: expandedOffset, expanded: true };
+  }
+
+  function isEditableTargetAllowed(snapshot, element) {
+    if (!snapshot || !element) return false;
+    const root = snapshot.navigationRoot ?? (snapshot.source === "article" ? snapshot.root : null);
+    return Boolean(root && root !== document.body && root !== document.documentElement &&
+      root.isConnected && root.contains(element));
+  }
+
+  function navigationScopeForSelection(range) {
+    const ancestor = commonAncestorElement(range);
+    for (let element = ancestor; element && element !== document.body && element !== document.documentElement;
+      element = element.parentElement) {
+      if (element.matches("article, main, [role='document'], [role='main']"))
+        return { root: element, kind: "document" };
+    }
+
+    const startHost = editingHost(range.startContainer);
+    const endHost = editingHost(range.endContainer);
+    return startHost && startHost === endHost ? { root: startHost, kind: "editable" } : null;
+  }
+
+  function editingHost(node) {
+    let element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    if (!element?.isContentEditable) return null;
+    while (element.parentElement?.isContentEditable)
+      element = element.parentElement;
+    return element === document.body || element === document.documentElement ? null : element;
+  }
+
+  function textPositionAtPoint(x, y) {
     let node = null;
     let offset = 0;
     if (typeof document.caretPositionFromPoint === "function") {
@@ -145,9 +200,13 @@
       offset = 0;
     }
     if (!node || node.nodeType !== Node.TEXT_NODE) return null;
-    const globalOffset = core.globalOffsetForNode(snapshot.runs, node, offset);
-    if (globalOffset == null || globalOffset >= snapshot.text.length) return null;
     if (!pointTouchesText(node, offset, x, y)) return null;
+    return { node, offset };
+  }
+
+  function offsetForPosition(snapshot, position) {
+    const globalOffset = core.globalOffsetForNode(snapshot.runs, position.node, position.offset);
+    if (globalOffset == null || globalOffset >= snapshot.text.length) return null;
     return core.isUtf16Boundary(snapshot.text, globalOffset) ? globalOffset : Math.max(0, globalOffset - 1);
   }
 
@@ -198,6 +257,8 @@
     buildSelectionSnapshot,
     buildArticleSnapshot,
     locatePoint,
+    resolveReadingTarget,
+    isEditableTargetAllowed,
     createRanges
   });
 })(globalThis);

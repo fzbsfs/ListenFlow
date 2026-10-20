@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>ListenFlow 可编辑文档定位夹具</title>
+  <style>body{font:16px sans-serif;padding:24px}.toolbar{padding:8px;background:#eee}p,pre{margin:20px 0}</style>
+</head>
+<body>
+  <div class="toolbar" role="toolbar"><button>工具按钮</button><input value="输入框"></div>
+  <main role="document" id="document-root">
+    <div contenteditable="true" id="block-one"><p id="selected">第一块正文，用于选区启动朗读。</p></div>
+    <div contenteditable="true" id="block-two">
+      <p id="target">第二块较远正文，用于左键重新定位。</p>
+      <pre id="code"><code>const message = "代码块🙂定位";</code></pre>
+      <a href="#link">普通链接保持网页原交互</a>
+    </div>
+  </main>
+  <script src="../snapshot-core.js"></script>
+  <script src="../dom-snapshot.js"></script>
+</body>
+</html>

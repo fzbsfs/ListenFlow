@@ -83,6 +83,31 @@ public sealed class DesktopCommandRouterTests
     }
 
     [Fact]
+    public void 同一会话递增命令序号_允许原子替换正文快照和目标位置()
+    {
+        using var context = new DedicatedThreadSynchronizationContext();
+        var target = new FakeRemotePlaybackTarget();
+        using var router = new DesktopCommandRouter(target, context);
+        Assert.Equal(ProtocolConstants.Types.Ack, router.Handle(StartCommand(1)).Type);
+
+        var response = router.Handle(StartCommand(2) with
+        {
+            RequestId = "replace-snapshot",
+            SnapshotId = "snapshot-2",
+            SnapshotVersion = 2,
+            Text = "扩展后的完整文档。第二句。",
+            Offset = 4
+        });
+
+        Assert.Equal(ProtocolConstants.Types.Ack, response.Type);
+        Assert.Equal("session-1", response.SessionId);
+        Assert.Equal("snapshot-2", response.SnapshotId);
+        Assert.Equal(2, response.SnapshotVersion);
+        Assert.Equal(2, target.StartCount);
+        Assert.Equal("扩展后的完整文档。第二句。", target.Text);
+    }
+
+    [Fact]
     public async Task 后台播放回调_出站进度仍由指定状态线程发布()
     {
         using var context = new DedicatedThreadSynchronizationContext();
