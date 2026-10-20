@@ -4,7 +4,7 @@ param(
     [string]$ManifestDirectory = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest\NativeMessaging"),
     [string]$RegistryPath = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.listenflow.native_host",
     [string]$StartMenuDirectory = (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
-    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow"),
+    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest\Data"),
     [switch]$RemoveUserData,
     [switch]$SkipEdgeLaunch,
     [switch]$SkipShortcut
@@ -104,7 +104,9 @@ if ($RemoveUserData) {
 }
 
 Write-Host "ListenFlow 程序和 Native Messaging Host 注册已移除。"
-Write-Host "验收数据与诊断日志仍保留在：$env:LOCALAPPDATA\ListenFlow-EdgeTest\Data"
+if (-not $RemoveUserData) {
+    Write-Host "验收数据与诊断日志仍保留在：$DataRoot"
+}
 Write-Host "请在 Edge 的 edge://extensions/ 页面移除“ListenFlow 网页听读”扩展。"
 
 if (-not $SkipEdgeLaunch) {

@@ -203,6 +203,7 @@ $installationInfo = [ordered]@{
     extensionPath = $installedExtension
     nativeHostManifest = $manifestFull
     previousNativeHostManifest = $previousNativeHostManifest
+    dataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest\Data")
     installedAt = [DateTimeOffset]::Now.ToString("o")
 }
 [IO.File]::WriteAllText(

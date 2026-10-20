@@ -80,6 +80,10 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $installRoot "app\edge-test-isolated-data.marker"))) {
         throw "验收版缺少独立数据目录标记。"
     }
+    $installedUninstall = Get-Content -LiteralPath (Join-Path $installRoot "tools\Uninstall-ListenFlow.ps1") -Raw -Encoding UTF8
+    if (-not $installedUninstall.Contains('ListenFlow-EdgeTest\Data')) {
+        throw "卸载脚本没有把可选数据删除目标限制在验收版独立目录。"
+    }
 
     Write-Host "[2/6] 验证扩展、宿主清单与注册路径"
     $nativeManifestPath = (Get-Item -LiteralPath $registryPath).GetValue("")
