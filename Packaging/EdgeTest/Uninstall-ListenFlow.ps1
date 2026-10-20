@@ -74,7 +74,10 @@ if (Test-Path -LiteralPath $manifestFull) {
 }
 
 if (-not $SkipShortcut) {
-    foreach ($shortcut in @("ListenFlow Edge 人工验收版.lnk", "卸载 ListenFlow Edge 人工验收版.lnk")) {
+    foreach ($shortcut in @(
+        "ListenFlow Edge 人工验收版.lnk",
+        "卸载 ListenFlow Edge 人工验收版.lnk",
+        "导出 ListenFlow 诊断日志.lnk")) {
         $path = Join-Path $StartMenuDirectory $shortcut
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }
@@ -101,6 +104,7 @@ if ($RemoveUserData) {
 }
 
 Write-Host "ListenFlow 程序和 Native Messaging Host 注册已移除。"
+Write-Host "验收数据与诊断日志仍保留在：$env:LOCALAPPDATA\ListenFlow-EdgeTest\Data"
 Write-Host "请在 Edge 的 edge://extensions/ 页面移除“ListenFlow 网页听读”扩展。"
 
 if (-not $SkipEdgeLaunch) {

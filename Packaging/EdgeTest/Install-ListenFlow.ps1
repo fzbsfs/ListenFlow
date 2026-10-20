@@ -196,7 +196,7 @@ if (-not [string]::Equals($registeredManifest, $manifestFull, [StringComparison]
 }
 
 $installationInfo = [ordered]@{
-    version = "0.2.0-edge-test"
+    version = "0.2.0-web-fixes-diagnostic"
     extensionId = $expectedExtensionId
     nativeHostName = $nativeHostName
     installRoot = $installFull
@@ -226,6 +226,14 @@ if (-not $SkipShortcut) {
     $uninstallShortcut.WorkingDirectory = $installFull
     $uninstallShortcut.Description = "卸载 ListenFlow，默认保留本地阅读数据"
     $uninstallShortcut.Save()
+
+    $diagnosticShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "导出 ListenFlow 诊断日志.lnk"))
+    $diagnosticShortcut.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $diagnosticScript = Join-Path $installFull "tools\Export-Diagnostics.ps1"
+    $diagnosticShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$diagnosticScript`""
+    $diagnosticShortcut.WorkingDirectory = $installFull
+    $diagnosticShortcut.Description = "导出不含正文的 ListenFlow 本地诊断日志"
+    $diagnosticShortcut.Save()
 }
 
 if (-not $SkipAppLaunch) {

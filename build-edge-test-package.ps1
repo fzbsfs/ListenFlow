@@ -69,6 +69,10 @@ try {
 
     Copy-Item -LiteralPath (Join-Path $mainPublish "ListenFlow.exe") -Destination $payloadApp
     Copy-Item -LiteralPath (Join-Path $hostPublish "ListenFlow.NativeHost.exe") -Destination $payloadApp
+    [IO.File]::WriteAllText(
+        (Join-Path $payloadApp "edge-test-isolated-data.marker"),
+        "ListenFlow Edge test data is isolated from the regular 0.2.0 profile.",
+        (New-Object Text.UTF8Encoding($false)))
 
     Write-Host "[5/7] 复制离线 Edge 扩展与安装工具"
     $extensionFiles = @(
@@ -85,12 +89,15 @@ try {
     $packaging = Join-Path $PSScriptRoot "Packaging\EdgeTest"
     Copy-Item -LiteralPath (Join-Path $packaging "Install-ListenFlow.ps1") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $packaging "Uninstall-ListenFlow.ps1") -Destination $packageStage
+    Copy-Item -LiteralPath (Join-Path $packaging "Export-Diagnostics.ps1") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $packaging "人工验收说明.txt") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $packaging "Uninstall-ListenFlow.ps1") -Destination $payloadTools
+    Copy-Item -LiteralPath (Join-Path $packaging "Export-Diagnostics.ps1") -Destination $payloadTools
 
     $cmdCopies = [ordered]@{
         "安装 ListenFlow.cmd" = Join-Path $packageStage "安装 ListenFlow.cmd"
         "卸载 ListenFlow.cmd" = Join-Path $packageStage "卸载 ListenFlow.cmd"
+        "导出诊断日志.cmd" = Join-Path $packageStage "导出诊断日志.cmd"
         "已安装版本卸载.cmd" = Join-Path $packageStage "payload\卸载 ListenFlow.cmd"
     }
     $ascii = [Text.Encoding]::ASCII
@@ -109,7 +116,7 @@ try {
     $commit = (& git -C $PSScriptRoot rev-parse HEAD).Trim()
     $buildInfo = [ordered]@{
         product = "ListenFlow"
-        version = "0.2.0-edge-test"
+        version = "0.2.0-web-fixes-diagnostic"
         platform = "win-x64"
         selfContained = $true
         extensionId = "chdkljcgemgeljdnfdnblbelfhmkkfbp"

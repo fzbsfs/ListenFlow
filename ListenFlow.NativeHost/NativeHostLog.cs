@@ -19,7 +19,12 @@ internal static class NativeHostLog
             {
                 var root = Environment.GetEnvironmentVariable("LISTENFLOW_DATA_DIR");
                 if (string.IsNullOrWhiteSpace(root))
-                    root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ListenFlow");
+                {
+                    var isolatedMarker = Path.Combine(AppContext.BaseDirectory, "edge-test-isolated-data.marker");
+                    root = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        File.Exists(isolatedMarker) ? "ListenFlow-EdgeTest\\Data" : "ListenFlow");
+                }
                 var directory = Path.Combine(root, "logs");
                 Directory.CreateDirectory(directory);
                 var path = Path.Combine(directory, "native-host-" + DateTime.Now.ToString("yyyyMMdd") + ".log");

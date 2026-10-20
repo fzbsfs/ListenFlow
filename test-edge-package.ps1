@@ -18,6 +18,7 @@ $installScript = Join-Path $packageFull "Install-ListenFlow.ps1"
 $uninstallScript = Join-Path $packageFull "Uninstall-ListenFlow.ps1"
 $installEntry = Join-Path $packageFull "安装 ListenFlow.cmd"
 $uninstallEntry = Join-Path $packageFull "卸载 ListenFlow.cmd"
+$exportEntry = Join-Path $packageFull "导出诊断日志.cmd"
 $previousManifest = Join-Path $testRoot "previous-native-host.json"
 
 function Assert-CmdFormat([string]$EntryPath) {
@@ -57,6 +58,7 @@ Set-Item -LiteralPath $registryPath -Value $previousManifest
 try {
     Assert-CmdFormat $installEntry
     Assert-CmdFormat $uninstallEntry
+    Assert-CmdFormat $exportEntry
 
     $installArguments = @(
         "-InstallRoot", $installRoot,
@@ -65,7 +67,7 @@ try {
         "-StartMenuDirectory", $startMenu,
         "-SkipEdgeLaunch", "-SkipAppLaunch", "-SkipShortcut")
 
-    Write-Host "[1/5] 使用 Windows CMD 入口执行隔离安装"
+    Write-Host "[1/6] 使用 Windows CMD 入口执行隔离安装"
     $installExitCode = Invoke-CmdEntry $installEntry $installArguments
     if ($installExitCode -ne 0) { throw "CMD 入口隔离安装失败：$installExitCode" }
 
@@ -75,8 +77,11 @@ try {
     foreach ($required in @($app, $hostExecutable, $extensionManifest)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "安装后文件缺失：$required" }
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $installRoot "app\edge-test-isolated-data.marker"))) {
+        throw "验收版缺少独立数据目录标记。"
+    }
 
-    Write-Host "[2/5] 验证扩展、宿主清单与注册路径"
+    Write-Host "[2/6] 验证扩展、宿主清单与注册路径"
     $nativeManifestPath = (Get-Item -LiteralPath $registryPath).GetValue("")
     $nativeManifest = Get-Content -LiteralPath $nativeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ([IO.Path]::GetFullPath([string]$nativeManifest.path) -ne [IO.Path]::GetFullPath($hostExecutable)) {
@@ -86,7 +91,7 @@ try {
         throw "宿主清单扩展身份不匹配。"
     }
 
-    Write-Host "[3/5] 重复执行 CMD 安装并验证幂等更新"
+    Write-Host "[3/6] 重复执行 CMD 安装并验证幂等更新"
     $repeatExitCode = Invoke-CmdEntry $installEntry $installArguments
     if ($repeatExitCode -ne 0) { throw "重复执行 CMD 安装失败：$repeatExitCode" }
     $registeredAfterRepeat = (Get-Item -LiteralPath $registryPath).GetValue("")
@@ -94,12 +99,28 @@ try {
         throw "重复安装后宿主注册发生偏移。"
     }
 
-    Write-Host "[4/5] 使用已安装自包含组件运行真实通信探针"
+    Write-Host "[4/6] 使用已安装自包含组件运行真实通信探针"
     $probe = Join-Path $PSScriptRoot "ListenFlow.CommunicationProbe\bin\Release\net10.0-windows\ListenFlow.CommunicationProbe.dll"
     & $dotnet $probe $hostExecutable $app (Join-Path $dataRoot "Probe") $dotnetRoot
     if ($LASTEXITCODE -ne 0) { throw "已安装组件通信探针失败。" }
 
-    Write-Host "[5/5] 使用 Windows CMD 入口执行隔离卸载"
+    Write-Host "[5/6] 使用 Windows PowerShell 5.1 验证诊断日志导出"
+    $diagnosticData = Join-Path $testRoot "DiagnosticData"
+    $diagnosticLogs = Join-Path $diagnosticData "logs"
+    $diagnosticExports = Join-Path $testRoot "DiagnosticExports"
+    New-Item -ItemType Directory -Path $diagnosticLogs, $diagnosticExports -Force | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $diagnosticLogs "listenflow-diagnostic-test.jsonl"),
+        '{"component":"desktop","stage":"test","textLength":100}',
+        (New-Object Text.UTF8Encoding($false)))
+    $exportExitCode = Invoke-CmdEntry $exportEntry @(
+        "-DataRoot", $diagnosticData,
+        "-OutputDirectory", $diagnosticExports)
+    if ($exportExitCode -ne 0 -or @(Get-ChildItem -LiteralPath $diagnosticExports -Filter "*.zip").Count -ne 1) {
+        throw "Windows CMD 与 PowerShell 5.1 诊断导出验证失败。"
+    }
+
+    Write-Host "[6/6] 使用 Windows CMD 入口执行隔离卸载"
     $uninstallExitCode = Invoke-CmdEntry $uninstallEntry @(
         "-InstallRoot", $installRoot,
         "-ManifestDirectory", $manifestDirectory,
