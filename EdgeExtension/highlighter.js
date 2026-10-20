@@ -25,7 +25,7 @@
         this.renderOverlay();
       else
         this.removeOverlays();
-      this.scrollIntoView();
+      // 语音进度只更新原文高亮，页面位置始终由用户控制。
     }
 
     clear() {
@@ -36,13 +36,6 @@
       removeEventListener("resize", this.refreshOverlay, true);
       this.ranges = [];
       this.usesOverlay = false;
-    }
-
-    scrollIntoView() {
-      const rect = this.ranges[0]?.getBoundingClientRect();
-      if (!rect || (rect.top >= 80 && rect.bottom <= innerHeight - 60)) return;
-      const node = this.ranges[0]?.startContainer?.parentElement;
-      node?.scrollIntoView({ block: "center", behavior: "smooth" });
     }
 
     renderOverlay() {

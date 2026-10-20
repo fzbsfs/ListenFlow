@@ -10,7 +10,8 @@ $extension = Join-Path $PSScriptRoot "EdgeExtension"
 $stepCount = if ($CdpEndpoint) { 3 } else { 2 }
 
 Write-Host "[1/$stepCount] 运行 UTF-16、句子范围和 DOM 映射核心测试"
-node --test (Join-Path $extension "tests\snapshot-core.test.cjs")
+$testFiles = @(Get-ChildItem -LiteralPath (Join-Path $extension "tests") -Filter "*.test.cjs" | ForEach-Object { $_.FullName })
+node --test @testFiles
 if ($LASTEXITCODE -ne 0) { throw "Edge 核心测试失败。" }
 
 Write-Host "[2/$stepCount] 验证 Manifest V3、固定扩展标识和本地依赖"
