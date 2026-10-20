@@ -1,4 +1,5 @@
 using System.Text;
+using ListenFlow.Diagnostics;
 
 namespace ListenFlow.NativeHost;
 
@@ -6,8 +7,12 @@ internal static class NativeHostLog
 {
     private static readonly object Gate = new();
 
+    public static void WriteEvent(string stage, IReadOnlyDictionary<string, object?>? details = null,
+        Exception? exception = null) => LocalDiagnosticLog.Write("native-host", stage, details, exception);
+
     public static void Write(string context, Exception? exception)
     {
+        WriteEvent(context, exception: exception);
         try
         {
             lock (Gate)

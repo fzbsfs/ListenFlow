@@ -12,7 +12,7 @@ public sealed class DesktopConnectionFactoryTests
         await using var server = CreateServer(pipeName);
         var wait = server.WaitForConnectionAsync();
         var launcher = new CountingLauncher();
-        var factory = new DesktopConnectionFactory(Options(pipeName), launcher);
+        var factory = new DesktopConnectionFactory(Options(pipeName), launcher, () => false);
 
         await using var connection = await factory.ConnectAsync(CancellationToken.None);
         await wait.WaitAsync(TimeSpan.FromSeconds(5));
@@ -32,7 +32,7 @@ public sealed class DesktopConnectionFactoryTests
             server = CreateServer(pipeName);
             wait = server.WaitForConnectionAsync();
         });
-        var factory = new DesktopConnectionFactory(Options(pipeName), launcher);
+        var factory = new DesktopConnectionFactory(Options(pipeName), launcher, () => false);
 
         await using var connection = await factory.ConnectAsync(CancellationToken.None);
         Assert.NotNull(wait);

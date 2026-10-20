@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>ListenFlow 长文诊断夹具</title>
+</head>
+<body>
+  <nav>导航内容不应进入主要正文。</nav>
+  <main>
+    <article id="article">
+      <h1>长篇技术文章夹具</h1>
+      <p>本页面只包含合成测试文字，用于验证长文、列表、代码和 UTF-16 映射。</p>
+    </article>
+  </main>
+  <aside>侧栏内容不应进入主要正文。</aside>
+  <script>
+    const article = document.getElementById("article");
+    for (let index = 0; index < 360; index++) {
+      const section = document.createElement("section");
+      section.innerHTML = `<h2>第 ${index + 1} 节</h2>
+        <p>中文技术段落 ${index + 1}：类、接口、集合与并发控制。English API ${index + 1}，表情🙂，数字 12345。</p>
+        <ul><li>嵌套列表第一项。</li><li>嵌套列表第二项：<code>Map&lt;String, Integer&gt;</code></li></ul>
+        <pre><code>for (int value = 0; value &lt; ${index + 1}; value++) { /* 本地代码 */ }</code></pre>`;
+      article.appendChild(section);
+    }
+  </script>
+  <script src="../vendor/Readability.js"></script>
+  <script src="../snapshot-core.js"></script>
+  <script src="../dom-snapshot.js"></script>
+</body>
+</html>

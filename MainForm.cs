@@ -1,6 +1,7 @@
 using System.Text;
 using ListenFlow.Communication;
 using ListenFlow.Core;
+using ListenFlow.Diagnostics;
 using ListenFlow.Speech;
 using ListenFlow.Storage;
 
@@ -269,12 +270,13 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
     {
         try
         {
-            _speechService = new SapiSpeechService(SynchronizationContext.Current);
+            _speechService = new SapiSpeechService(SynchronizationContext.Current, AppLog.WriteEvent);
             _reader = new ReaderController(
                 _speechService,
                 new TextChunker(),
                 queueDepth: 3,
-                stateContext: SynchronizationContext.Current)
+                stateContext: SynchronizationContext.Current,
+                diagnostic: AppLog.WriteEvent)
             {
                 Rate = (int)_rateBox.Value
             };

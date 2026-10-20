@@ -7,6 +7,7 @@ public sealed class NativeHostRunner : IAsyncDisposable
     private readonly LengthPrefixedMessageStream _nativeTransport;
     private readonly IDesktopConnectionFactory _connectionFactory;
     private readonly Action<string, Exception?>? _log;
+    private readonly Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? _diagnostic;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
     private readonly object _sessionGate = new();
@@ -15,11 +16,13 @@ public sealed class NativeHostRunner : IAsyncDisposable
     public NativeHostRunner(
         LengthPrefixedMessageStream nativeTransport,
         IDesktopConnectionFactory connectionFactory,
-        Action<string, Exception?>? log = null)
+        Action<string, Exception?>? log = null,
+        Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? diagnostic = null)
     {
         _nativeTransport = nativeTransport ?? throw new ArgumentNullException(nameof(nativeTransport));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _log = log;
+        _diagnostic = diagnostic;
     }
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
@@ -45,6 +48,12 @@ public sealed class NativeHostRunner : IAsyncDisposable
             }
 
             if (command is null) break;
+            Log("native-command-received", CommandDetails(command));
+            if (command.Type == ProtocolConstants.Types.Diagnostic)
+            {
+                Log(command.DiagnosticStage ?? "browser-diagnostic", CommandDetails(command));
+                continue;
+            }
             await SendCommandOnceAsync(command, linked.Token).ConfigureAwait(false);
         }
         return 0;
@@ -83,6 +92,7 @@ public sealed class NativeHostRunner : IAsyncDisposable
         try
         {
             await session.Transport.WriteAsync(command, cancellationToken).ConfigureAwait(false);
+            Log("native-command-sent-to-pipe", CommandDetails(command));
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException)
         {
@@ -103,7 +113,10 @@ public sealed class NativeHostRunner : IAsyncDisposable
         lock (_sessionGate)
         {
             if (_session is { IsClosed: false } active)
+            {
+                Log("native-pipe-reused", new Dictionary<string, object?> { ["connectionState"] = "connected" });
                 return active;
+            }
         }
 
         await _connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -116,6 +129,7 @@ public sealed class NativeHostRunner : IAsyncDisposable
             }
 
             var stream = await _connectionFactory.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            Log("native-pipe-connected", new Dictionary<string, object?> { ["connectionState"] = "connected" });
             var session = new PipeSession(stream);
             lock (_sessionGate)
                 _session = session;
@@ -136,6 +150,7 @@ public sealed class NativeHostRunner : IAsyncDisposable
             {
                 var message = await session.Transport.ReadAsync(cancellationToken).ConfigureAwait(false);
                 if (message is null) break;
+                Log("native-event-received-from-pipe", CommandDetails(message));
                 await _nativeTransport.WriteAsync(message, cancellationToken).ConfigureAwait(false);
             }
             if (!cancellationToken.IsCancellationRequested)
@@ -199,6 +214,35 @@ public sealed class NativeHostRunner : IAsyncDisposable
             Message = message,
             Recoverable = recoverable
         }, cancellationToken);
+
+    private void Log(string stage, IReadOnlyDictionary<string, object?>? details = null,
+        Exception? exception = null)
+    {
+        try { _diagnostic?.Invoke(stage, details, exception); }
+        catch { }
+    }
+
+    private static IReadOnlyDictionary<string, object?> CommandDetails(BridgeMessage message) =>
+        new Dictionary<string, object?>
+        {
+            ["messageType"] = message.Type,
+            ["sessionId"] = message.SessionId,
+            ["snapshotId"] = message.SnapshotId,
+            ["snapshotVersion"] = message.SnapshotVersion,
+            ["commandSeq"] = message.CommandSeq,
+            ["requestId"] = message.RequestId,
+            ["generation"] = message.PlaybackGeneration,
+            ["position"] = message.Offset,
+            ["rangeLength"] = message.Length,
+            ["textLength"] = message.TextLength ?? message.Text?.Length,
+            ["nodeCount"] = message.NodeCount,
+            ["elapsedMilliseconds"] = message.ElapsedMilliseconds,
+            ["reason"] = message.Reason,
+            ["source"] = message.Source,
+            ["frameId"] = message.FrameId,
+            ["state"] = message.State,
+            ["code"] = message.Code
+        };
 
     private sealed class PipeSession(Stream stream) : IAsyncDisposable
     {

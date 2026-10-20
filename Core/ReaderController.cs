@@ -34,6 +34,7 @@ public sealed class ReaderController : IDisposable
     private readonly TextChunker _chunker;
     private readonly int _queueDepth;
     private readonly SynchronizationContext? _stateContext;
+    private readonly Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? _diagnostic;
     private readonly Dictionary<Guid, QueuedPrompt> _queued = [];
     private readonly Queue<Guid> _promptOrder = [];
     private IReadOnlyList<TextSegment> _chunks = [];
@@ -52,7 +53,8 @@ public sealed class ReaderController : IDisposable
         ISpeechService speech,
         TextChunker chunker,
         int queueDepth = 2,
-        SynchronizationContext? stateContext = null)
+        SynchronizationContext? stateContext = null,
+        Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? diagnostic = null)
     {
         _speech = speech ?? throw new ArgumentNullException(nameof(speech));
         _chunker = chunker ?? throw new ArgumentNullException(nameof(chunker));
@@ -60,6 +62,7 @@ public sealed class ReaderController : IDisposable
             throw new ArgumentOutOfRangeException(nameof(queueDepth));
         _queueDepth = queueDepth;
         _stateContext = stateContext;
+        _diagnostic = diagnostic;
         _speech.Progressed += OnProgressed;
         _speech.Completed += OnCompleted;
     }
@@ -87,6 +90,13 @@ public sealed class ReaderController : IDisposable
         if (!CancelCurrentSession("切换文章")) return;
         _text = text ?? string.Empty;
         _chunks = _chunker.Split(_text);
+        Log("reader-document-prepared", new Dictionary<string, object?>
+        {
+            ["textLength"] = _text.Length,
+            ["chunkCount"] = _chunks.Count,
+            ["position"] = position,
+            ["queueDepth"] = _queueDepth
+        });
         _position = Math.Clamp(position, 0, _text.Length);
         _nextChunkIndex = FindChunkIndex(_position);
         _spokenRange = new TextRange(_position, 0);
@@ -271,6 +281,16 @@ public sealed class ReaderController : IDisposable
                 var id = _speech.SpeakAsync(remaining, _rate);
                 _queued[id] = new QueuedPrompt(_generation, promptStart, chunk.End, remaining.Length);
                 _promptOrder.Enqueue(id);
+                Log("reader-prompt-queued", new Dictionary<string, object?>
+                {
+                    ["promptId"] = id,
+                    ["generation"] = _generation,
+                    ["chunkIndex"] = _nextChunkIndex - 1,
+                    ["queueCount"] = _queued.Count,
+                    ["rangeStart"] = promptStart,
+                    ["rangeEnd"] = chunk.End,
+                    ["rangeLength"] = remaining.Length
+                });
             }
             catch (Exception exception)
             {
@@ -309,6 +329,15 @@ public sealed class ReaderController : IDisposable
 
         _position = prompt.Start + eventArgs.CharacterPosition;
         _spokenRange = new TextRange(_position, eventArgs.CharacterCount);
+        Log("reader-progress-accepted", new Dictionary<string, object?>
+        {
+            ["promptId"] = eventArgs.PromptId,
+            ["generation"] = _generation,
+            ["position"] = _position,
+            ["rangeStart"] = _spokenRange.Start,
+            ["rangeLength"] = _spokenRange.Length,
+            ["rangeEnd"] = _spokenRange.End
+        });
         RaiseChanged();
     }
 
@@ -417,6 +446,15 @@ public sealed class ReaderController : IDisposable
 
     private void Fail(string message, bool cancelPlayback = true)
     {
+        Log("reader-error", new Dictionary<string, object?>
+        {
+            ["generation"] = _generation,
+            ["position"] = _position,
+            ["state"] = _state.ToString(),
+            ["reason"] = message,
+            ["lastProgressPosition"] = _spokenRange.Start,
+            ["lastProgressLength"] = _spokenRange.Length
+        });
         _generation++;
         if (cancelPlayback && (_queued.Count > 0 || _state is PlaybackState.Speaking or PlaybackState.Paused))
         {
@@ -448,6 +486,13 @@ public sealed class ReaderController : IDisposable
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+
+    private void Log(string stage, IReadOnlyDictionary<string, object?>? details = null,
+        Exception? exception = null)
+    {
+        try { _diagnostic?.Invoke(stage, details, exception); }
+        catch { }
+    }
 
     private void RaiseChanged() => Changed?.Invoke(this,
         new ReaderChangedEventArgs(

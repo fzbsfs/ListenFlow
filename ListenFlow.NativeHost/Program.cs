@@ -13,7 +13,8 @@ internal static class Program
         {
             var options = NativeHostOptions.FromEnvironment(AppContext.BaseDirectory);
             var connector = new DesktopConnectionFactory(options, new DesktopAppLauncher(options));
-            await using var runner = new NativeHostRunner(nativeTransport, connector, NativeHostLog.Write);
+            await using var runner = new NativeHostRunner(
+                nativeTransport, connector, NativeHostLog.Write, NativeHostLog.WriteEvent);
             return await runner.RunAsync().ConfigureAwait(false);
         }
         catch (Exception exception)

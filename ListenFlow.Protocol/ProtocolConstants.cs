@@ -24,6 +24,7 @@ public static class ProtocolConstants
         public const string Progress = "progress";
         public const string Error = "error";
         public const string Pong = "pong";
+        public const string Diagnostic = "diagnostic";
     }
 
     public static readonly IReadOnlySet<string> CommandTypes = new HashSet<string>(StringComparer.Ordinal)

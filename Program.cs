@@ -49,11 +49,12 @@ internal static class Program
             {
                 var context = SynchronizationContext.Current
                               ?? throw new InvalidOperationException("未取得桌面状态线程。");
-                router = new DesktopCommandRouter(form, context);
+                router = new DesktopCommandRouter(form, context, AppLog.WriteEvent);
                 pipeServer = new DesktopPipeServer(
                     router,
                     log: (contextMessage, exception) =>
                     {
+                        AppLog.WriteEvent(contextMessage, exception: exception);
                         if (exception is not null)
                             AppLog.WriteException(contextMessage, exception);
                     });

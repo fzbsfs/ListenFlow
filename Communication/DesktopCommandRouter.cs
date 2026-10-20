@@ -18,16 +18,21 @@ public sealed class DesktopCommandRouter : IDisposable
 
     private readonly IRemotePlaybackTarget _target;
     private readonly SynchronizationContext _stateContext;
+    private readonly Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? _diagnostic;
     private string? _sessionId;
     private string? _snapshotId;
     private long? _snapshotVersion;
     private long _lastCommandSeq = -1;
     private bool _disposed;
 
-    public DesktopCommandRouter(IRemotePlaybackTarget target, SynchronizationContext stateContext)
+    public DesktopCommandRouter(
+        IRemotePlaybackTarget target,
+        SynchronizationContext stateContext,
+        Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? diagnostic = null)
     {
         _target = target ?? throw new ArgumentNullException(nameof(target));
         _stateContext = stateContext ?? throw new ArgumentNullException(nameof(stateContext));
+        _diagnostic = diagnostic;
         _target.PlaybackChanged += OnPlaybackChanged;
     }
 
@@ -60,6 +65,7 @@ public sealed class DesktopCommandRouter : IDisposable
 
     private BridgeMessage HandleCore(BridgeMessage command)
     {
+        Log("router-command-received", command);
         if (_disposed)
             return Error(command, "router_disposed", "通信路由已经关闭。", recoverable: false);
 
@@ -144,6 +150,7 @@ public sealed class DesktopCommandRouter : IDisposable
                 command.SessionId!,
                 command.SnapshotId!,
                 command.SnapshotVersion!.Value));
+            Log("router-start-accepted", command);
             return Ack(command);
         }
         catch (Exception exception)
@@ -209,6 +216,19 @@ public sealed class DesktopCommandRouter : IDisposable
     private void PublishPlaybackChanged(ReaderChangedEventArgs eventArgs)
     {
         if (_disposed || _sessionId is null) return;
+        Log("router-playback-state", new BridgeMessage
+        {
+            Type = ProtocolConstants.Types.State,
+            SessionId = _sessionId,
+            SnapshotId = _snapshotId,
+            SnapshotVersion = _snapshotVersion,
+            PlaybackGeneration = eventArgs.Generation,
+            State = StateName(eventArgs.State),
+            Offset = eventArgs.Position,
+            Length = eventArgs.SpokenRange.Length,
+            Code = eventArgs.State == PlaybackState.Error ? "playback_error" : null,
+            Message = eventArgs.ErrorMessage
+        });
         var state = new BridgeMessage
         {
             Type = ProtocolConstants.Types.State,
@@ -267,4 +287,28 @@ public sealed class DesktopCommandRouter : IDisposable
         PlaybackState.Error => "error",
         _ => "unknown"
     };
+
+    private void Log(string stage, BridgeMessage message, Exception? exception = null)
+    {
+        try
+        {
+            _diagnostic?.Invoke(stage, new Dictionary<string, object?>
+            {
+                ["messageType"] = message.Type,
+                ["sessionId"] = message.SessionId,
+                ["snapshotId"] = message.SnapshotId,
+                ["snapshotVersion"] = message.SnapshotVersion,
+                ["commandSeq"] = message.CommandSeq,
+                ["requestId"] = message.RequestId,
+                ["generation"] = message.PlaybackGeneration,
+                ["textLength"] = message.Text?.Length,
+                ["position"] = message.Offset,
+                ["rangeLength"] = message.Length,
+                ["state"] = message.State,
+                ["code"] = message.Code,
+                ["reason"] = message.Message
+            }, exception);
+        }
+        catch { }
+    }
 }

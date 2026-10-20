@@ -6,15 +6,21 @@ public sealed class SapiSpeechService : ISpeechService
 {
     private readonly SpeechSynthesizer _synthesizer = new();
     private readonly Dictionary<Prompt, Guid> _promptIds = [];
+    private readonly HashSet<Guid> _progressedPromptIds = [];
     private readonly SynchronizationContext? _callbackContext;
+    private readonly Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? _diagnostic;
     private bool _disposed;
 
-    public SapiSpeechService(SynchronizationContext? callbackContext = null)
+    public SapiSpeechService(
+        SynchronizationContext? callbackContext = null,
+        Action<string, IReadOnlyDictionary<string, object?>?, Exception?>? diagnostic = null)
     {
         try
         {
             _callbackContext = callbackContext ?? SynchronizationContext.Current;
+            _diagnostic = diagnostic;
             _synthesizer.SetOutputToDefaultAudioDevice();
+            _synthesizer.SpeakStarted += OnSpeakStarted;
             _synthesizer.SpeakProgress += OnSpeakProgress;
             _synthesizer.SpeakCompleted += OnSpeakCompleted;
             Voices = _synthesizer.GetInstalledVoices()
@@ -63,6 +69,13 @@ public sealed class SapiSpeechService : ISpeechService
         try
         {
             _synthesizer.SpeakAsync(prompt);
+            Log("sapi-prompt-queued", new Dictionary<string, object?>
+            {
+                ["promptId"] = id,
+                ["textLength"] = text.Length,
+                ["rate"] = _synthesizer.Rate,
+                ["voiceName"] = SelectedVoiceName
+            });
         }
         catch
         {
@@ -98,6 +111,7 @@ public sealed class SapiSpeechService : ISpeechService
     {
         if (_disposed) return;
         _disposed = true;
+        _synthesizer.SpeakStarted -= OnSpeakStarted;
         _synthesizer.SpeakProgress -= OnSpeakProgress;
         _synthesizer.SpeakCompleted -= OnSpeakCompleted;
         try
@@ -118,7 +132,16 @@ public sealed class SapiSpeechService : ISpeechService
         lock (_promptIds)
         {
             if (!_promptIds.TryGetValue(eventArgs.Prompt, out id)) return;
+            _progressedPromptIds.Add(id);
         }
+
+        Log("sapi-progress", new Dictionary<string, object?>
+        {
+            ["promptId"] = id,
+            ["position"] = eventArgs.CharacterPosition,
+            ["characterCount"] = eventArgs.CharacterCount,
+            ["sapiStarted"] = true
+        });
 
         Raise(() => Progressed?.Invoke(this, new SpeechProgressEventArgs(
             id, eventArgs.CharacterPosition, eventArgs.CharacterCount)));
@@ -127,12 +150,42 @@ public sealed class SapiSpeechService : ISpeechService
     private void OnSpeakCompleted(object? sender, SpeakCompletedEventArgs eventArgs)
     {
         Guid id;
+        bool hasProgress;
         lock (_promptIds)
         {
             if (!_promptIds.Remove(eventArgs.Prompt, out id)) return;
+            hasProgress = _progressedPromptIds.Remove(id);
         }
 
+        Log("sapi-completed", new Dictionary<string, object?>
+        {
+            ["promptId"] = id,
+            ["cancelled"] = eventArgs.Cancelled,
+            ["hasProgress"] = hasProgress
+        }, eventArgs.Error);
+
         Raise(() => Completed?.Invoke(this, new SpeechCompletedEventArgs(id, eventArgs.Cancelled, eventArgs.Error)));
+    }
+
+    private void OnSpeakStarted(object? sender, SpeakStartedEventArgs eventArgs)
+    {
+        Guid id;
+        lock (_promptIds)
+        {
+            if (!_promptIds.TryGetValue(eventArgs.Prompt, out id)) return;
+        }
+        Log("sapi-started", new Dictionary<string, object?>
+        {
+            ["promptId"] = id,
+            ["sapiStarted"] = true
+        });
+    }
+
+    private void Log(string stage, IReadOnlyDictionary<string, object?>? details = null,
+        Exception? exception = null)
+    {
+        try { _diagnostic?.Invoke(stage, details, exception); }
+        catch { }
     }
 
     private void Raise(Action action)

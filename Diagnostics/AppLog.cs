@@ -9,6 +9,9 @@ public static class AppLog
 
     public static string LogDirectory => Path.Combine(AppPaths.DataDirectory, "logs");
 
+    public static void WriteEvent(string stage, IReadOnlyDictionary<string, object?>? details = null,
+        Exception? exception = null) => LocalDiagnosticLog.Write("desktop", stage, details, exception);
+
     public static void WriteException(string context, Exception exception)
     {
         try

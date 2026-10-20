@@ -23,5 +23,6 @@
 
   <ItemGroup>
     <ProjectReference Include="ListenFlow.Protocol\ListenFlow.Protocol.csproj" />
+    <InternalsVisibleTo Include="ListenFlow.Tests" />
   </ItemGroup>
 </Project>

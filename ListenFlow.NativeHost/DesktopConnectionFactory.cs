@@ -32,15 +32,15 @@ public sealed class DesktopAppLauncher(NativeHostOptions options) : IDesktopAppL
 
 public sealed class DesktopConnectionFactory(
     NativeHostOptions options,
-    IDesktopAppLauncher launcher) : IDesktopConnectionFactory
+    IDesktopAppLauncher launcher,
+    Func<bool>? desktopInstanceExists = null) : IDesktopConnectionFactory
 {
     public async Task<Stream> ConnectAsync(CancellationToken cancellationToken)
     {
         var first = await TryConnectAsync(cancellationToken).ConfigureAwait(false);
         if (first is not null) return first;
 
-        var desktopExists = Mutex.TryOpenExisting(ProtocolConstants.DesktopMutexName, out var mutex);
-        mutex?.Dispose();
+        var desktopExists = desktopInstanceExists?.Invoke() ?? DesktopInstanceExists();
         if (!desktopExists)
             launcher.Start();
 
@@ -62,6 +62,13 @@ public sealed class DesktopConnectionFactory(
         }
 
         throw new TimeoutException("无法在限定时间内连接 ListenFlow 主程序。", lastError);
+    }
+
+    private static bool DesktopInstanceExists()
+    {
+        var exists = Mutex.TryOpenExisting(ProtocolConstants.DesktopMutexName, out var mutex);
+        mutex?.Dispose();
+        return exists;
     }
 
     private async Task<NamedPipeClientStream?> TryConnectAsync(CancellationToken cancellationToken)

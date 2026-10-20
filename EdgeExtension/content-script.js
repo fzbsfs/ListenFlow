@@ -43,6 +43,7 @@
 
   async function startReading(mode) {
     clearActiveSession();
+    const extractionStarted = performance.now();
     const snapshot = mode === "selection"
       ? dom.buildSelectionSnapshot(lastContextSelection)
       : dom.buildArticleSnapshot();
@@ -60,8 +61,16 @@
       highlighter: new global.ListenFlowHighlighter(snapshot),
       runNodes: new Set(snapshot.runs.map(run => run.node)),
       observer: null,
-      lastProgressOffset: 0
+      lastProgressOffset: 0,
+      hasProgress: false,
+      hasHighlighted: false
     };
+    emitDiagnostic("edge-snapshot-created", {
+      textLength: snapshot.text.length,
+      nodeCount: snapshot.runs.length,
+      elapsedMilliseconds: Math.round(performance.now() - extractionStarted),
+      source: mode
+    });
     observeSnapshot(active);
     const command = {
       version: 1,
@@ -79,6 +88,7 @@
       voiceName: "Microsoft Xiaoxiao"
     };
     await forwardCommand(command);
+    emitDiagnostic("edge-start-posted", { textLength: snapshot.text.length, source: mode });
     showToast(mode === "selection" ? "正在朗读所选文字。" : "正在朗读网页正文。左键点击正文可重新定位。");
   }
 
@@ -122,6 +132,8 @@
       active.state = message.state;
       if (["speaking", "paused"].includes(message.state) && Number.isInteger(message.offset))
         highlightSentence(message.offset);
+      if (message.state === "error")
+        showToast("ListenFlow 播放错误：" + (message.message ?? message.code ?? "未知错误"));
       if (["stopped", "completed", "error"].includes(message.state))
         clearActiveSession(message.state === "completed" ? "朗读完成。" : undefined);
       return;
@@ -130,6 +142,14 @@
     if (message.type === "progress" && Number.isInteger(message.offset) && message.length > 0) {
       active.state = message.state ?? "speaking";
       active.lastProgressOffset = message.offset;
+      if (!active.hasProgress) {
+        active.hasProgress = true;
+        emitDiagnostic("edge-first-progress", {
+          offset: message.offset,
+          length: message.length,
+          playbackGeneration: message.playbackGeneration
+        });
+      }
       highlightSentence(message.offset);
       return;
     }
@@ -142,6 +162,14 @@
     if (!active || offset < 0 || offset > active.snapshot.text.length) return;
     const sentence = core.findSentenceRange(active.snapshot.text, offset);
     active.highlighter.set(sentence.start, sentence.length);
+    if (!active.hasHighlighted) {
+      active.hasHighlighted = true;
+      emitDiagnostic("edge-first-highlight", {
+        offset: sentence.start,
+        length: sentence.length,
+        playbackGeneration: active.generation
+      });
+    }
   }
 
   function handleReadingClick(event) {
@@ -185,6 +213,11 @@
         sessionId: session.sessionId,
         commandSeq: ++session.commandSeq
       };
+      emitDiagnostic("edge-snapshot-invalidated", {
+        reason: mutationReason(session, mutations),
+        offset: session.lastProgressOffset,
+        playbackGeneration: session.generation
+      });
       void forwardCommand(stop).catch(() => {});
       clearActiveSession("网页正文已发生变化，请重新启动朗读。");
     });
@@ -203,6 +236,32 @@
       }
     }
     return false;
+  }
+
+  function mutationReason(session, mutations) {
+    const mutation = mutations.find(item => affectsSnapshot(session, item));
+    if (!mutation) return "unknown";
+    return mutation.type === "characterData"
+      ? "mapped-character-data"
+      : `mapped-child-list:${mutation.addedNodes.length}:${mutation.removedNodes.length}`;
+  }
+
+  function emitDiagnostic(stage, details = {}) {
+    const session = active;
+    void chrome.runtime.sendMessage({
+      kind: "browser-diagnostic",
+      diagnostic: {
+        version: 1,
+        type: "diagnostic",
+        requestId: crypto.randomUUID(),
+        diagnosticStage: stage,
+        sessionId: session?.sessionId,
+        snapshotId: session?.snapshotId,
+        snapshotVersion: session?.snapshotVersion,
+        commandSeq: session?.commandSeq,
+        ...details
+      }
+    }).catch(() => {});
   }
 
   function clearActiveSession(message) {

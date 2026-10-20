@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using ListenFlow.NativeHost;
 using ListenFlow.Protocol;
@@ -7,6 +8,39 @@ namespace ListenFlow.Tests;
 
 public sealed class NativeHostRunnerTests
 {
+    [Fact]
+    public async Task 浏览器诊断消息_只写本地元数据且不连接桌面管道()
+    {
+        await using var nativePair = await PipePair.CreateAsync();
+        var browser = new LengthPrefixedMessageStream(nativePair.Client, nativePair.Client);
+        var native = new LengthPrefixedMessageStream(nativePair.Server, nativePair.Server);
+        var factory = new ScriptedConnectionFactory();
+        var records = new ConcurrentBag<(string Stage, IReadOnlyDictionary<string, object?>? Details)>();
+        await using var runner = new NativeHostRunner(
+            native,
+            factory,
+            diagnostic: (stage, details, _) => records.Add((stage, details)));
+        var runTask = runner.RunAsync();
+
+        await browser.WriteAsync(new BridgeMessage
+        {
+            Type = ProtocolConstants.Types.Diagnostic,
+            DiagnosticStage = "edge-snapshot-created",
+            SessionId = "session-1",
+            TextLength = 30000,
+            NodeCount = 2700,
+            Source = "article"
+        });
+        await Task.Delay(100);
+
+        Assert.Equal(0, factory.ConnectionCount);
+        var record = Assert.Single(records, item => item.Stage == "edge-snapshot-created");
+        Assert.Equal(30000, record.Details?["textLength"]);
+        Assert.Equal(2700, record.Details?["nodeCount"]);
+        nativePair.Client.Dispose();
+        Assert.Equal(0, await runTask.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
     [Fact]
     public async Task 管道断开后_下一条新命令重连且旧开始命令不重放()
     {

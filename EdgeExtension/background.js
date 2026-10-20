@@ -42,10 +42,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           : info.menuItemId === MENU.stop ? "stop"
             : null;
   if (!action) return;
+  postBrowserDiagnostic("edge-menu-clicked", { state: action, frameId: info.frameId ?? 0 });
   void ensureContentAndSend(tab.id, info.frameId ?? 0, { kind: "context-action", action });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.kind === "browser-diagnostic" && message.diagnostic) {
+    try {
+      ensureNativePort().postMessage(message.diagnostic);
+      sendResponse({ ok: true });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error?.message ?? error) });
+    }
+    return false;
+  }
   if (message?.kind !== "bridge-command" || !message.command) return false;
   const tabId = sender.tab?.id;
   if (tabId == null) {
@@ -173,6 +183,24 @@ async function ensureContentAndSend(tabId, frameId, message) {
     await chrome.tabs.sendMessage(tabId, message, target);
   } catch (error) {
     console.warn("ListenFlow 无法注入当前页面：", error);
+    postBrowserDiagnostic("edge-content-injection-failed", {
+      frameId,
+      reason: String(error?.message ?? error)
+    });
+  }
+}
+
+function postBrowserDiagnostic(stage, details = {}) {
+  try {
+    ensureNativePort().postMessage({
+      version: 1,
+      type: "diagnostic",
+      requestId: crypto.randomUUID(),
+      diagnosticStage: stage,
+      ...details
+    });
+  } catch (error) {
+    console.warn("ListenFlow 无法写入本地诊断：", error);
   }
 }
 
