@@ -20,7 +20,7 @@ $output = Join-Path $OutputDirectory ("ListenFlow-diagnostics-" + (Get-Date -For
 try {
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Copy-Item -LiteralPath $logs.FullName -Destination $stage
-    Compress-Archive -LiteralPath (Join-Path $stage "*") -DestinationPath $output -CompressionLevel Optimal
+    Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $output -CompressionLevel Optimal
     Write-Host "Diagnostic archive: $output"
 } finally {
     if (Test-Path -LiteralPath $stage) {
