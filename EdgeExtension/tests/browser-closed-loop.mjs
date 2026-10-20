@@ -216,6 +216,12 @@ async function main() {
     return value.text.includes("真实语音进度会从本机程序返回") ? value : null;
   }, "所选网页文字的进度高亮");
   console.log(`通过：所选网页文字进入本地朗读并高亮：${selected.text}`);
+  await clickText("#paragraph-3", "点击定位目标");
+  const expandedSelection = await waitUntil(async () => {
+    const value = await readHighlight();
+    return value.text.includes("点击位置附近重新开始朗读") ? value : null;
+  }, "选区朗读扩展到同一文档远处正文", 10000);
+  console.log(`通过：选区朗读可点击同文档远处正文并原子替换快照：${expandedSelection.text}`);
   await sendContextAction(worker, "stop");
   await waitUntil(async () => (await readHighlight()).count === 0, "停止所选文字朗读");
 
@@ -230,6 +236,19 @@ async function main() {
   assert.ok(customHighlightVisible || first.overlayCount > 0, "高亮范围存在，但视觉高亮没有生效。");
   await saveScreenshot("01-实际进度高亮");
   console.log(`通过：实际进度已在网页原文高亮：${first.text}`);
+
+  const manualScroll = await evaluate(page, `(() => {
+    const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+    window.scrollTo(0, maximum);
+    return { maximum, position: scrollY };
+  })()`);
+  if (manualScroll.maximum > 0) {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const afterProgress = await evaluate(page, "scrollY");
+    assert.ok(Math.abs(afterProgress - manualScroll.position) <= 2,
+      `语音进度不应强制改变手动滚动位置：${manualScroll.position} -> ${afterProgress}`);
+    console.log("通过：语音进度更新没有把手动滚动位置拉回高亮句。");
+  }
 
   await clickText("#paragraph-3", "点击定位目标");
   const located = await waitUntil(async () => {

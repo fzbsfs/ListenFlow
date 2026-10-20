@@ -51,7 +51,7 @@ Native Messaging Host：`com.listenflow.native_host`
   -ScreenshotDirectory .\test-artifacts\edge-screenshots
 ```
 
-闭环测试会使用真实 Native Messaging Host、命名管道、ListenFlow 主程序和 SAPI 进度，验证所选文字与正文朗读、网页原文视觉高亮、左键定位、暂停定位、继续、连续定位、交互控件放行和停止清理。浏览器原生右键菜单项仍需人工点选一次，因为调试协议不能操作浏览器原生菜单。
+闭环测试会使用真实 Native Messaging Host、命名管道、ListenFlow 主程序和 SAPI 进度，验证所选文字扩展到同文档远处正文、正文朗读、网页原文视觉高亮、自由滚动、左键定位、暂停定位、继续、连续定位、交互控件放行和停止清理。浏览器原生右键菜单项仍需人工点选一次，因为调试协议不能操作浏览器原生菜单。
 
 CSS Custom Highlight API 可用且样式可见时优先使用；若扩展隔离执行环境只保留高亮范围但未绘制样式，则自动使用基于同一组 DOM Range 矩形的覆盖层。覆盖层不复制正文、不改写文字节点，也不接收鼠标事件。
 
