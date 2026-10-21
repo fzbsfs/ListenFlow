@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>ListenFlow.NativeHost</AssemblyName>
     <RootNamespace>ListenFlow.NativeHost</RootNamespace>
+    <Version>0.2.2</Version>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

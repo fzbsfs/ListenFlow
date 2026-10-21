@@ -1,10 +1,11 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\ListenFlow-EdgeTest"),
-    [string]$ManifestDirectory = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest\NativeMessaging"),
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\ListenFlow"),
+    [string]$ManifestDirectory = (Join-Path $env:LOCALAPPDATA "ListenFlow\NativeMessaging"),
     [string]$RegistryPath = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.listenflow.native_host",
     [string]$StartMenuDirectory = (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
-    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest\Data"),
+    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow"),
+    [string]$LegacyInstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\ListenFlow-EdgeTest"),
     [switch]$RemoveUserData,
     [switch]$SkipEdgeLaunch,
     [switch]$SkipShortcut
@@ -79,6 +80,8 @@ if (-not $SkipShortcut) {
         "卸载 ListenFlow Edge 人工验收版.lnk",
         "ListenFlow 0.2.1.lnk",
         "卸载 ListenFlow 0.2.1.lnk",
+        "ListenFlow.lnk",
+        "卸载 ListenFlow.lnk",
         "导出 ListenFlow 诊断日志.lnk")) {
         $path = Join-Path $StartMenuDirectory $shortcut
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
@@ -87,9 +90,17 @@ if (-not $SkipShortcut) {
 
 if (Test-Path -LiteralPath $installFull) {
     if ((Split-Path -Leaf $installFull) -notin @("ListenFlow-EdgeTest", "ListenFlow")) {
-        throw "拒绝删除名称不是 ListenFlow-EdgeTest 的安装目录：$installFull"
+        throw "拒绝删除名称不是 ListenFlow 的安装目录：$installFull"
     }
     Remove-Item -LiteralPath $installFull -Recurse -Force
+}
+
+$legacyInstallFull = [IO.Path]::GetFullPath($LegacyInstallRoot)
+if (Test-Path -LiteralPath $legacyInstallFull -PathType Container) {
+    if ((Split-Path -Leaf $legacyInstallFull) -ne "ListenFlow-EdgeTest") {
+        throw "拒绝删除名称不是 ListenFlow-EdgeTest 的扩展兼容目录：$legacyInstallFull"
+    }
+    Remove-Item -LiteralPath $legacyInstallFull -Recurse -Force
 }
 
 if ($RemoveUserData) {
@@ -107,7 +118,7 @@ if ($RemoveUserData) {
 
 Write-Host "ListenFlow 程序和 Native Messaging Host 注册已移除。"
 if (-not $RemoveUserData) {
-    Write-Host "验收数据与诊断日志仍保留在：$DataRoot"
+    Write-Host "阅读数据与诊断日志仍保留在：$DataRoot"
 }
 Write-Host "请在 Edge 的 edge://extensions/ 页面移除“ListenFlow 网页听读”扩展。"
 

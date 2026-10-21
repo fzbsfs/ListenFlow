@@ -1,9 +1,12 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\ListenFlow-EdgeTest"),
-    [string]$ManifestDirectory = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest\NativeMessaging"),
+    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\ListenFlow"),
+    [string]$ManifestDirectory = (Join-Path $env:LOCALAPPDATA "ListenFlow\NativeMessaging"),
     [string]$RegistryPath = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.listenflow.native_host",
     [string]$StartMenuDirectory = (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
+    [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow"),
+    [string]$LegacyInstallRoot = (Join-Path $env:LOCALAPPDATA "Programs\ListenFlow-EdgeTest"),
+    [string]$LegacyDataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest"),
     [switch]$SkipEdgeLaunch,
     [switch]$SkipAppLaunch,
     [switch]$SkipShortcut
@@ -12,6 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 $expectedExtensionId = "chdkljcgemgeljdnfdnblbelfhmkkfbp"
 $nativeHostName = "com.listenflow.native_host"
+$productVersion = "0.2.2"
 $packageRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $payloadRoot = Join-Path $packageRoot "payload"
 $checksumsPath = Join-Path $packageRoot "checksums.json"
@@ -76,15 +80,17 @@ function Stop-InstalledProcesses([string[]]$ExecutablePaths) {
     }
 }
 
-function Stop-RunningDesktopApp([string]$TargetExecutablePath) {
-    $targetFull = [IO.Path]::GetFullPath($TargetExecutablePath)
+function Stop-RunningDesktopApp([string[]]$ManagedExecutablePaths) {
+    $managed = @{}
+    foreach ($path in $ManagedExecutablePaths) {
+        $managed[[IO.Path]::GetFullPath($path)] = $true
+    }
     foreach ($runningApp in @(Get-Process -Name "ListenFlow" -ErrorAction SilentlyContinue)) {
         $runningPath = $null
         try { $runningPath = [IO.Path]::GetFullPath($runningApp.MainModule.FileName) } catch {
         }
-        if (-not $runningPath -or
-            -not [string]::Equals($runningPath, $targetFull, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "请先正常关闭其他位置正在运行的 ListenFlow，再安装 0.2.1。进程号：$($runningApp.Id)"
+        if (-not $runningPath -or -not $managed.ContainsKey($runningPath)) {
+            throw "请先正常关闭其他未知位置正在运行的 ListenFlow，再安装 $productVersion。进程号：$($runningApp.Id)"
         }
 
         for ($attempt = 0; $attempt -lt 20 -and -not $runningApp.HasExited; $attempt++) {
@@ -100,6 +106,62 @@ function Stop-RunningDesktopApp([string]$TargetExecutablePath) {
             $runningApp.WaitForExit(5000)
         }
     }
+}
+
+function Merge-LegacyData([string]$SourceRoot, [string]$TargetRoot) {
+    if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) { return }
+    $sourceFull = [IO.Path]::GetFullPath($SourceRoot)
+    if ((Split-Path -Leaf $sourceFull) -ne "ListenFlow-EdgeTest") {
+        throw "拒绝迁移名称不是 ListenFlow-EdgeTest 的旧数据目录：$sourceFull"
+    }
+    New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
+    $stamp = [DateTimeOffset]::Now.ToString("yyyyMMdd-HHmmss")
+    $backup = Join-Path $TargetRoot "migration-backups\ListenFlow-EdgeTest-$stamp"
+    New-Item -ItemType Directory -Path $backup -Force | Out-Null
+    Copy-Item -LiteralPath $sourceFull -Destination $backup -Recurse -Force
+
+    $sourceHistory = Join-Path $sourceFull "Data\history"
+    $targetHistory = Join-Path $TargetRoot "history"
+    if (Test-Path -LiteralPath $sourceHistory -PathType Container) {
+        New-Item -ItemType Directory -Path $targetHistory -Force | Out-Null
+        Get-ChildItem -LiteralPath $sourceHistory -File | ForEach-Object {
+            $target = Join-Path $targetHistory $_.Name
+            if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $_.FullName -Destination $target }
+        }
+    }
+
+    $sourceProgress = Join-Path $sourceFull "Data\progress.json"
+    $targetProgress = Join-Path $TargetRoot "progress.json"
+    if (Test-Path -LiteralPath $sourceProgress -PathType Leaf) {
+        $useLegacy = -not (Test-Path -LiteralPath $targetProgress -PathType Leaf)
+        if (-not $useLegacy) {
+            $useLegacy = (Get-Item -LiteralPath $sourceProgress).LastWriteTimeUtc -gt
+                (Get-Item -LiteralPath $targetProgress).LastWriteTimeUtc
+        }
+        if ($useLegacy) {
+            if (Test-Path -LiteralPath $targetProgress -PathType Leaf) {
+                Copy-Item -LiteralPath $targetProgress -Destination (Join-Path $backup "previous-standard-progress.json") -Force
+            }
+            Copy-Item -LiteralPath $sourceProgress -Destination $targetProgress -Force
+        }
+    }
+    Remove-Item -LiteralPath $sourceFull -Recurse -Force
+}
+
+function Update-LegacyExtensionAlias([string]$LegacyRoot, [string]$CanonicalExtension) {
+    $legacyFull = [IO.Path]::GetFullPath($LegacyRoot)
+    if ((Split-Path -Leaf $legacyFull) -ne "ListenFlow-EdgeTest") {
+        throw "拒绝更新名称不是 ListenFlow-EdgeTest 的扩展兼容目录：$legacyFull"
+    }
+    if (Test-Path -LiteralPath $legacyFull) {
+        Remove-Item -LiteralPath $legacyFull -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $legacyFull -Force | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $legacyFull "extension") -Target $CanonicalExtension | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $legacyFull "扩展目录已迁移.txt"),
+        "此目录只为 Edge 已加载的旧路径提供兼容入口。实际最新版扩展位于：$CanonicalExtension",
+        (New-Object Text.UTF8Encoding($false)))
 }
 
 if (-not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
@@ -123,6 +185,11 @@ if ($extensionManifest.manifest_version -ne 3 -or
     -not ($extensionManifest.permissions -contains "nativeMessaging")) {
     throw "扩展清单缺少 Manifest V3 或 nativeMessaging 权限。"
 }
+if ([string]$extensionManifest.version -ne $productVersion) {
+    throw "扩展版本与安装器不一致。安装器 $productVersion，扩展 $($extensionManifest.version)。"
+}
+
+$edgeWasRunning = @(Get-Process -Name "msedge" -ErrorAction SilentlyContinue).Count -gt 0
 
 $installFull = [IO.Path]::GetFullPath($InstallRoot)
 $installParent = Split-Path -Parent $installFull
@@ -148,11 +215,21 @@ if (Test-Path -LiteralPath $RegistryPath) {
         }
     }
 }
+$legacyDataFull = [IO.Path]::GetFullPath($LegacyDataRoot)
+if ($previousNativeHostManifest) {
+    $previousManifestFull = [IO.Path]::GetFullPath([string]$previousNativeHostManifest)
+    if ($previousManifestFull.StartsWith($legacyDataFull.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        $previousNativeHostManifest = $null
+    }
+}
 
 $installedApp = Join-Path $installFull "app\ListenFlow.exe"
 $installedHost = Join-Path $installFull "app\ListenFlow.NativeHost.exe"
-Stop-RunningDesktopApp $installedApp
-Stop-InstalledProcesses @($installedApp, $installedHost)
+$legacyInstallFull = [IO.Path]::GetFullPath($LegacyInstallRoot)
+$legacyApp = Join-Path $legacyInstallFull "app\ListenFlow.exe"
+$legacyHost = Join-Path $legacyInstallFull "app\ListenFlow.NativeHost.exe"
+Stop-RunningDesktopApp @($installedApp, $legacyApp)
+Stop-InstalledProcesses @($installedApp, $installedHost, $legacyApp, $legacyHost)
 
 try {
     New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
@@ -195,15 +272,23 @@ if (-not [string]::Equals($registeredManifest, $manifestFull, [StringComparison]
     throw "Native Messaging Host 注册验证失败。"
 }
 
+if (-not [string]::Equals($legacyInstallFull, $installFull, [StringComparison]::OrdinalIgnoreCase) -and
+    (Split-Path -Leaf $legacyInstallFull) -eq "ListenFlow-EdgeTest") {
+    Update-LegacyExtensionAlias $legacyInstallFull $installedExtension
+}
+Merge-LegacyData $legacyDataFull ([IO.Path]::GetFullPath($DataRoot))
+
 $installationInfo = [ordered]@{
-    version = "0.2.1"
+    version = $productVersion
     extensionId = $expectedExtensionId
     nativeHostName = $nativeHostName
     installRoot = $installFull
     extensionPath = $installedExtension
     nativeHostManifest = $manifestFull
     previousNativeHostManifest = $previousNativeHostManifest
-    dataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest\Data")
+    dataRoot = ([IO.Path]::GetFullPath($DataRoot))
+    edgeWasRunningDuringInstall = $edgeWasRunning
+    edgeReloadRequired = $edgeWasRunning
     installedAt = [DateTimeOffset]::Now.ToString("o")
 }
 [IO.File]::WriteAllText(
@@ -215,20 +300,22 @@ if (-not $SkipShortcut) {
     New-Item -ItemType Directory -Path $StartMenuDirectory -Force | Out-Null
     foreach ($legacyShortcut in @(
         "ListenFlow Edge 人工验收版.lnk",
-        "卸载 ListenFlow Edge 人工验收版.lnk")) {
+        "卸载 ListenFlow Edge 人工验收版.lnk",
+        "ListenFlow 0.2.1.lnk",
+        "卸载 ListenFlow 0.2.1.lnk")) {
         $legacyShortcutPath = Join-Path $StartMenuDirectory $legacyShortcut
         if (Test-Path -LiteralPath $legacyShortcutPath -PathType Leaf) {
             Remove-Item -LiteralPath $legacyShortcutPath -Force
         }
     }
     $shell = New-Object -ComObject WScript.Shell
-    $appShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "ListenFlow 0.2.1.lnk"))
+    $appShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "ListenFlow.lnk"))
     $appShortcut.TargetPath = $installedApp
     $appShortcut.WorkingDirectory = Split-Path -Parent $installedApp
     $appShortcut.Description = "ListenFlow 本地听读助手"
     $appShortcut.Save()
 
-    $uninstallShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "卸载 ListenFlow 0.2.1.lnk"))
+    $uninstallShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "卸载 ListenFlow.lnk"))
     $uninstallShortcut.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $uninstallScript = Join-Path $installFull "tools\Uninstall-ListenFlow.ps1"
     $uninstallShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
@@ -250,16 +337,20 @@ if (-not $SkipAppLaunch) {
 }
 
 Write-Host ""
-Write-Host "ListenFlow 0.2.1 安装完成。"
+Write-Host "ListenFlow $productVersion 安装完成。"
 Write-Host "主程序：$installedApp"
 Write-Host "扩展目录：$installedExtension"
 Write-Host "扩展固定标识：$expectedExtensionId"
 Write-Host "宿主清单：$manifestFull"
 Write-Host ""
-Write-Host "Edge 仍需手动加载一次解压缩扩展："
-Write-Host "1. 打开 edge://extensions/ 并开启开发人员模式。"
-Write-Host "2. 点击“加载解压缩的扩展”，选择：$installedExtension"
-Write-Host "3. 确认扩展标识为：$expectedExtensionId"
+if ($edgeWasRunning) {
+    Write-Warning "安装时 Edge 正在运行。磁盘扩展已经更新为 $productVersion，但浏览器内存中可能仍是旧版。"
+    Write-Host "请在 edge://extensions/ 对 ListenFlow 点击一次“重新加载”，或关闭所有 Edge 窗口后重新打开。"
+} else {
+    Write-Host "Edge 安装时未运行；下次启动会从固定目录加载 $productVersion。"
+}
+Write-Host "若扩展尚未加载：在 edge://extensions/ 开启开发人员模式，选择“加载解压缩的扩展”：$installedExtension"
+Write-Host "扩展固定标识：$expectedExtensionId"
 
 if (-not $SkipEdgeLaunch) {
     $edgeCandidates = @(@(

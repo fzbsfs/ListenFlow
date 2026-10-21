@@ -90,7 +90,7 @@ Edge 扩展的加载、注册和验证方法见 [Edge 扩展说明](EdgeExtensio
 .\build-edge-test-package.ps1 -RunVoiceIntegrationTests
 ```
 
-输出目录为 `artifacts\ListenFlow-0.2.1-Windows-x64`，压缩包为同名 ZIP。解压后双击“安装 ListenFlow.cmd”；程序默认安装到 `%LOCALAPPDATA%\Programs\ListenFlow-EdgeTest`，不需要管理员权限，也不修改默认浏览器。Edge 出于安全限制仍要求用户在 `edge://extensions/` 中手动加载一次 `%LOCALAPPDATA%\Programs\ListenFlow-EdgeTest\extension`。
+输出目录固定为 `artifacts\latest`，版本压缩包为 `artifacts\ListenFlow-0.2.2-Windows-x64.zip`。解压后双击“安装 ListenFlow.cmd”；程序默认安装到 `%LOCALAPPDATA%\Programs\ListenFlow`，数据保存在 `%LOCALAPPDATA%\ListenFlow`，不需要管理员权限，也不修改默认浏览器。安装器会清理旧程序并保留一个指向最新版扩展的旧路径兼容入口。若安装时 Edge 正在运行，需要在 `edge://extensions/` 对 ListenFlow 点击一次“重新加载”，或关闭所有 Edge 窗口后重新打开。
 
 安装入口的 CMD 编码、换行和重复安装回归见 [Edge 人工验收安装脚本修复报告](docs/Edge人工验收安装脚本修复报告.md)。
 

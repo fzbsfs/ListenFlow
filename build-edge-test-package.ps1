@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot "artifacts\ListenFlow-0.2.1-Windows-x64"),
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot "artifacts\latest"),
     [string]$DotNetPath,
-    [switch]$RunVoiceIntegrationTests
+    [switch]$RunVoiceIntegrationTests,
+    [switch]$InstallAfterBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,7 @@ $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
 $env:DOTNET_CLI_HOME = Join-Path $PSScriptRoot ".dotnet-home"
 
 $dotnet = if ($DotNetPath) { (Resolve-Path -LiteralPath $DotNetPath).Path } else { (Get-Command dotnet -ErrorAction Stop).Source }
+$productVersion = "0.2.2"
 $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "artifacts"))
 $outputFull = [IO.Path]::GetFullPath($OutputDirectory)
 $artifactsPrefix = $artifactsRoot.TrimEnd('\') + '\'
@@ -69,12 +71,12 @@ try {
 
     Copy-Item -LiteralPath (Join-Path $mainPublish "ListenFlow.exe") -Destination $payloadApp
     Copy-Item -LiteralPath (Join-Path $hostPublish "ListenFlow.NativeHost.exe") -Destination $payloadApp
-    [IO.File]::WriteAllText(
-        (Join-Path $payloadApp "edge-test-isolated-data.marker"),
-        "ListenFlow 0.2.1 data is isolated from the regular 0.2.0 profile.",
-        (New-Object Text.UTF8Encoding($false)))
 
     Write-Host "[5/7] 复制离线 Edge 扩展与安装工具"
+    $extensionManifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot "EdgeExtension\manifest.json") -Raw | ConvertFrom-Json
+    if ([string]$extensionManifest.version -ne $productVersion) {
+        throw "扩展版本与构建版本不一致：$($extensionManifest.version) != $productVersion"
+    }
     $extensionFiles = @(
         "manifest.json", "background.js", "content-script.js", "content.css",
         "dom-snapshot.js", "highlighter.js", "snapshot-core.js"
@@ -116,9 +118,10 @@ try {
     $commit = (& git -C $PSScriptRoot rev-parse HEAD).Trim()
     $buildInfo = [ordered]@{
         product = "ListenFlow"
-        version = "0.2.1"
+        version = $productVersion
         platform = "win-x64"
         selfContained = $true
+        protocolVersion = 1
         extensionId = "chdkljcgemgeljdnfdnblbelfhmkkfbp"
         nativeHostName = "com.listenflow.native_host"
         commit = $commit
@@ -145,16 +148,28 @@ try {
     Write-Host "[7/7] 生成可解压安装包"
     if (Test-Path -LiteralPath $outputFull) { Remove-Item -LiteralPath $outputFull -Recurse -Force }
     Move-Item -LiteralPath $packageStage -Destination $outputFull
-    $zipPath = "$outputFull.zip"
+    $zipPath = Join-Path $artifactsRoot "ListenFlow-$productVersion-Windows-x64.zip"
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Compress-Archive -LiteralPath $outputFull -DestinationPath $zipPath -CompressionLevel Optimal
 
     $zipInfo = Get-Item -LiteralPath $zipPath
     $zipHash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256
+    Get-ChildItem -LiteralPath $artifactsRoot -Force | Where-Object {
+        $_.FullName -ne $outputFull -and $_.FullName -ne $zipPath -and
+        ($_.Name -like "ListenFlow-*.zip" -or
+         ($_.PSIsContainer -and ($_.Name -like "ListenFlow-*" -or $_.Name -like ".edge-package-*")))
+    } | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }
     Write-Host "人工验收目录：$outputFull"
     Write-Host "人工验收压缩包：$zipPath"
     Write-Host "压缩包大小：$($zipInfo.Length) 字节"
     Write-Host "压缩包 SHA256：$($zipHash.Hash)"
+    if ($InstallAfterBuild) {
+        Write-Host "正在覆盖安装 ListenFlow $productVersion"
+        & (Join-Path $outputFull "Install-ListenFlow.ps1") -SkipEdgeLaunch
+        if ($LASTEXITCODE -ne 0) { throw "自动安装失败：$LASTEXITCODE" }
+    }
 } finally {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 }

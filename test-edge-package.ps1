@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$PackageDirectory = (Join-Path $PSScriptRoot "artifacts\ListenFlow-0.2.1-Windows-x64"),
+    [string]$PackageDirectory = (Join-Path $PSScriptRoot "artifacts\latest"),
     [string]$DotNetPath
 )
 
@@ -9,8 +9,10 @@ $packageFull = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $dotnet = if ($DotNetPath) { (Resolve-Path -LiteralPath $DotNetPath).Path } else { (Get-Command dotnet -ErrorAction Stop).Source }
 $dotnetRoot = Split-Path -Parent $dotnet
 $testRoot = Join-Path $PSScriptRoot "test-artifacts\package-install"
-$installRoot = Join-Path $testRoot "Programs\ListenFlow-EdgeTest"
+$installRoot = Join-Path $testRoot "Programs\ListenFlow"
 $dataRoot = Join-Path $testRoot "State\ListenFlow"
+$legacyInstallRoot = Join-Path $testRoot "Programs\ListenFlow-EdgeTest"
+$legacyDataRoot = Join-Path $testRoot "State\ListenFlow-EdgeTest"
 $manifestDirectory = Join-Path $dataRoot "NativeMessaging"
 $registryPath = "HKCU:\Software\ListenFlow\Tests\NativeMessagingHosts\com.listenflow.native_host"
 $startMenu = Join-Path $testRoot "StartMenu"
@@ -52,8 +54,14 @@ function Invoke-CmdEntry([string]$EntryPath, [string[]]$Arguments) {
 if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $legacyInstallRoot "app"), (Join-Path $legacyDataRoot "Data\history") -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $legacyInstallRoot "app\legacy.txt"), "legacy")
+[IO.File]::WriteAllText((Join-Path $legacyDataRoot "Data\history\legacy.json"), '{"legacy":true}')
+[IO.File]::WriteAllText((Join-Path $legacyDataRoot "Data\progress.json"), '{"version":1}')
 [IO.File]::WriteAllText((Join-Path $startMenu "ListenFlow Edge 人工验收版.lnk"), "legacy")
 [IO.File]::WriteAllText((Join-Path $startMenu "卸载 ListenFlow Edge 人工验收版.lnk"), "legacy")
+[IO.File]::WriteAllText((Join-Path $startMenu "ListenFlow 0.2.1.lnk"), "legacy")
+[IO.File]::WriteAllText((Join-Path $startMenu "卸载 ListenFlow 0.2.1.lnk"), "legacy")
 [IO.File]::WriteAllText($previousManifest, '{"name":"previous.test.host"}', (New-Object Text.UTF8Encoding($false)))
 New-Item -Path $registryPath -Force | Out-Null
 Set-Item -LiteralPath $registryPath -Value $previousManifest
@@ -68,6 +76,9 @@ try {
         "-ManifestDirectory", $manifestDirectory,
         "-RegistryPath", $registryPath,
         "-StartMenuDirectory", $startMenu,
+        "-DataRoot", $dataRoot,
+        "-LegacyInstallRoot", $legacyInstallRoot,
+        "-LegacyDataRoot", $legacyDataRoot,
         "-SkipEdgeLaunch", "-SkipAppLaunch")
 
     Write-Host "[1/6] 使用 Windows CMD 入口执行隔离安装"
@@ -80,22 +91,39 @@ try {
     foreach ($required in @($app, $hostExecutable, $extensionManifest)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "安装后文件缺失：$required" }
     }
-    foreach ($shortcut in @("ListenFlow 0.2.1.lnk", "卸载 ListenFlow 0.2.1.lnk")) {
+    foreach ($shortcut in @("ListenFlow.lnk", "卸载 ListenFlow.lnk")) {
         if (-not (Test-Path -LiteralPath (Join-Path $startMenu $shortcut) -PathType Leaf)) {
             throw "安装后快捷方式缺失：$shortcut"
         }
     }
-    foreach ($legacyShortcut in @("ListenFlow Edge 人工验收版.lnk", "卸载 ListenFlow Edge 人工验收版.lnk")) {
+    foreach ($legacyShortcut in @(
+        "ListenFlow Edge 人工验收版.lnk", "卸载 ListenFlow Edge 人工验收版.lnk",
+        "ListenFlow 0.2.1.lnk", "卸载 ListenFlow 0.2.1.lnk")) {
         if (Test-Path -LiteralPath (Join-Path $startMenu $legacyShortcut)) {
             throw "安装后仍保留旧版快捷方式：$legacyShortcut"
         }
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $installRoot "app\edge-test-isolated-data.marker"))) {
-        throw "验收版缺少独立数据目录标记。"
+    if (Test-Path -LiteralPath (Join-Path $legacyInstallRoot "app")) {
+        throw "升级后仍保留旧版程序文件。"
     }
-    $installedUninstall = Get-Content -LiteralPath (Join-Path $installRoot "tools\Uninstall-ListenFlow.ps1") -Raw -Encoding UTF8
-    if (-not $installedUninstall.Contains('ListenFlow-EdgeTest\Data')) {
-        throw "卸载脚本没有把可选数据删除目标限制在验收版独立目录。"
+    $legacyExtensionAlias = Get-Item -LiteralPath (Join-Path $legacyInstallRoot "extension")
+    if ($legacyExtensionAlias.LinkType -ne "Junction" -or
+        [IO.Path]::GetFullPath([string]$legacyExtensionAlias.Target) -ne [IO.Path]::GetFullPath((Join-Path $installRoot "extension"))) {
+        throw "旧扩展路径没有重定向到统一的最新版扩展目录。"
+    }
+    if (Test-Path -LiteralPath $legacyDataRoot) {
+        throw "升级后仍保留旧数据根目录。"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $dataRoot "history\legacy.json"))) {
+        throw "旧版阅读历史没有迁移到统一数据目录。"
+    }
+    $installation = Get-Content -LiteralPath (Join-Path $installRoot "installation.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([string]$installation.version -ne "0.2.2" -or [IO.Path]::GetFullPath([string]$installation.dataRoot) -ne [IO.Path]::GetFullPath($dataRoot)) {
+        throw "安装元数据版本或数据目录不正确。"
+    }
+    $manifest = Get-Content -LiteralPath $extensionManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([string]$manifest.version -ne "0.2.2") {
+        throw "安装的 Edge 扩展不是 0.2.2。"
     }
 
     Write-Host "[2/6] 验证扩展、宿主清单与注册路径"
@@ -143,6 +171,7 @@ try {
         "-ManifestDirectory", $manifestDirectory,
         "-RegistryPath", $registryPath,
         "-StartMenuDirectory", $startMenu,
+        "-LegacyInstallRoot", $legacyInstallRoot,
         "-DataRoot", $dataRoot,
         "-RemoveUserData", "-SkipEdgeLaunch")
     if ($uninstallExitCode -ne 0) { throw "CMD 入口隔离卸载失败：$uninstallExitCode" }
