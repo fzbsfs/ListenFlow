@@ -4,7 +4,8 @@
   const core = global.ListenFlowSnapshotCore;
   const excludedSelector = [
     "script", "style", "noscript", "template", "svg", "canvas", "video", "audio",
-    "input", "textarea", "select", "option", "button", "[aria-hidden='true']"
+    "input", "textarea", "select", "option", "button", "[aria-hidden='true']",
+    ".listenflow-status-toast", ".listenflow-highlight-overlay", "[data-listenflow-owned]"
   ].join(",");
   const blockTags = new Set([
     "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DIV", "DL", "FIELDSET", "FIGCAPTION",
@@ -162,6 +163,49 @@
     return result;
   }
 
+  function mutationAffectsSnapshot(snapshot, mutation) {
+    if (!snapshot?.root || !mutation) return false;
+    if (mutation.type === "characterData")
+      return snapshot.runs.some(run => run.node === mutation.target) ||
+        (containsNode(snapshot.root, mutation.target) && isReadableTextNode(mutation.target));
+    if (mutation.type !== "childList" || !containsNode(snapshot.root, mutation.target)) return false;
+
+    for (const node of mutation.removedNodes ?? []) {
+      if (snapshot.runs.some(run => run.node === node || containsNode(node, run.node))) return true;
+      if (containsReadableText(node)) return true;
+    }
+    for (const node of mutation.addedNodes ?? []) {
+      if (isListenFlowOwned(node)) continue;
+      if (containsReadableText(node)) return true;
+    }
+    return false;
+  }
+
+  function containsReadableText(node) {
+    if (!node) return false;
+    if (node.nodeType === Node.TEXT_NODE) return isReadableTextNode(node);
+    if (node.nodeType !== Node.ELEMENT_NODE || isListenFlowOwned(node)) return false;
+    return readableTextNodes(node).length > 0;
+  }
+
+  function isReadableTextNode(node) {
+    if (!node?.data?.trim()) return false;
+    const parent = node.parentElement;
+    if (!parent || parent.closest(excludedSelector) || isListenFlowOwned(parent)) return false;
+    const style = getComputedStyle(parent);
+    return style.display !== "none" && style.visibility !== "hidden" && style.visibility !== "collapse";
+  }
+
+  function isListenFlowOwned(node) {
+    const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+    return Boolean(element?.matches?.(".listenflow-status-toast, .listenflow-highlight-overlay, [data-listenflow-owned]") ||
+      element?.closest?.(".listenflow-status-toast, .listenflow-highlight-overlay, [data-listenflow-owned]"));
+  }
+
+  function containsNode(root, node) {
+    return Boolean(root && node && (root === node || root.contains?.(node)));
+  }
+
   function locatePoint(snapshot, x, y) {
     const position = textPositionAtPoint(x, y);
     return position ? offsetForPosition(snapshot, position) : null;
@@ -292,6 +336,7 @@
     locatePoint,
     resolveReadingTarget,
     isEditableTargetAllowed,
-    createRanges
+    createRanges,
+    mutationAffectsSnapshot
   });
 })(globalThis);

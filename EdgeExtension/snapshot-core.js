@@ -55,6 +55,39 @@
     return null;
   }
 
+  function remapOffset(previousText, nextText, previousOffset) {
+    if (typeof previousText !== "string" || typeof nextText !== "string" || nextText.length === 0)
+      return 0;
+    const safeOffset = Math.min(Math.max(Number.isInteger(previousOffset) ? previousOffset : 0, 0),
+      Math.max(0, previousText.length - 1));
+    if (previousText === nextText)
+      return Math.min(safeOffset, nextText.length - 1);
+
+    for (const radius of [96, 64, 40, 24, 12]) {
+      const start = Math.max(0, safeOffset - Math.floor(radius / 3));
+      const end = Math.min(previousText.length, start + radius);
+      const anchor = previousText.slice(start, end);
+      if (anchor.trim().length < 8) continue;
+      const matches = [];
+      let index = nextText.indexOf(anchor);
+      while (index >= 0 && matches.length < 128) {
+        matches.push(index);
+        index = nextText.indexOf(anchor, index + 1);
+      }
+      if (matches.length === 0) continue;
+      const expected = Math.min(start, nextText.length - 1);
+      const match = matches.sort((left, right) => Math.abs(left - expected) - Math.abs(right - expected))[0];
+      const mapped = match + safeOffset - start;
+      return normalizeUtf16Offset(nextText, Math.min(Math.max(mapped, 0), nextText.length - 1));
+    }
+
+    return normalizeUtf16Offset(nextText, Math.min(safeOffset, nextText.length - 1));
+  }
+
+  function normalizeUtf16Offset(text, offset) {
+    return isUtf16Boundary(text, offset) ? offset : Math.max(0, offset - 1);
+  }
+
   function isHighSurrogate(value) {
     return value >= 0xd800 && value <= 0xdbff;
   }
@@ -67,7 +100,8 @@
     isUtf16Boundary,
     findSentenceRange,
     slicesForRange,
-    globalOffsetForNode
+    globalOffsetForNode,
+    remapOffset
   });
   global.ListenFlowSnapshotCore = api;
   if (typeof module === "object" && module.exports)

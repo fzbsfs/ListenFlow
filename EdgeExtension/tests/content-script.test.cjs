@@ -9,10 +9,13 @@ const source = fs.readFileSync(path.join(__dirname, "../content-script.js"), "ut
 function createFixture() {
   const messages = [];
   const highlighters = [];
+  const observers = [];
+  const timers = [];
   let listener;
   let toast = null;
   let uuid = 0;
   let articleBuilds = 0;
+  let articleText = "第一句。第二句。";
   class Element {
     closest() { return null; }
   }
@@ -22,13 +25,13 @@ function createFixture() {
     clear() { this.cleared = true; }
   }
   class MutationObserver {
-    constructor(callback) { this.callback = callback; }
+    constructor(callback) { this.callback = callback; observers.push(this); }
     observe() {}
     disconnect() {}
   }
   const snapshot = {
-    text: "第一句。第二句。",
-    runs: [{ node: {}, globalStart: 0, globalEnd: 8 }],
+    text: articleText,
+    runs: [{ node: {}, nodeStart: 0, nodeEnd: articleText.length, globalStart: 0, globalEnd: articleText.length }],
     source: "article",
     title: "测试标题"
   };
@@ -52,8 +55,8 @@ function createFixture() {
     location: { href: "https://fixture.invalid/article" },
     performance: { now: (() => { let now = 10; return () => now += 5; })() },
     crypto: { randomUUID: () => `id-${++uuid}` },
-    setTimeout: () => 1,
-    clearTimeout() {},
+    setTimeout(callback, delay) { const timer = { callback, delay, cancelled: false }; timers.push(timer); return timer; },
+    clearTimeout(timer) { if (timer) timer.cancelled = true; },
     getSelection: () => null,
     Element,
     Node: { ELEMENT_NODE: 1 },
@@ -61,13 +64,22 @@ function createFixture() {
     ListenFlowSnapshotCore: {
       findSentenceRange: (_text, offset) => offset < 4
         ? { start: 0, length: 4 }
-        : { start: 4, length: 4 }
+        : { start: 4, length: 4 },
+      remapOffset: (_previous, next, offset) => Math.min(offset, Math.max(0, next.length - 1))
     },
     ListenFlowDomSnapshot: {
-      buildArticleSnapshot: () => { articleBuilds++; return { ...snapshot, runs: [...snapshot.runs] }; },
+      buildArticleSnapshot: () => {
+        articleBuilds++;
+        return {
+          ...snapshot,
+          text: articleText,
+          runs: [{ ...snapshot.runs[0], nodeEnd: articleText.length, globalEnd: articleText.length }]
+        };
+      },
       buildPageSnapshot: () => ({ ...snapshot, source: "page", runs: [...snapshot.runs] }),
       buildSelectionSnapshot: () => snapshot,
-      locatePoint: () => null
+      locatePoint: () => null,
+      mutationAffectsSnapshot: (_snapshot, mutation) => mutation.relevant !== false
     },
     ListenFlowHighlighter: Highlighter,
     chrome: {
@@ -86,7 +98,20 @@ function createFixture() {
   return {
     dispatch, messages, snapshot, highlighters,
     getToast: () => toast,
-    getArticleBuilds: () => articleBuilds
+    getArticleBuilds: () => articleBuilds,
+    setArticleText(value) { articleText = value; },
+    async triggerRelevantMutation() {
+      observers.at(-1).callback([{
+        type: "childList", relevant: true, target: {}, addedNodes: [{}], removedNodes: []
+      }]);
+      for (const timer of timers.filter(item => item.delay === 700 && !item.cancelled)) {
+        timer.cancelled = true;
+        timer.callback();
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
   };
 }
 
@@ -171,4 +196,28 @@ test("右键语速命令立即发送到当前网页播放会话", async () => {
   assert.equal(command.type, "set-rate");
   assert.equal(command.rate, 4);
   assert.match(fixture.getToast().textContent, /\+4/);
+});
+
+test("朗读中的网页追加正文后自动重建快照而不是继续依赖旧扫描", async () => {
+  const fixture = createFixture();
+  await fixture.dispatch({ kind: "context-action", action: "start-article", rate: 2 });
+  const firstStart = fixture.messages.find(item => item.kind === "bridge-command").command;
+  await fixture.dispatch({
+    kind: "bridge-event",
+    message: {
+      type: "state", state: "speaking", sessionId: firstStart.sessionId,
+      snapshotId: firstStart.snapshotId, snapshotVersion: firstStart.snapshotVersion,
+      playbackGeneration: 1, offset: 4
+    }
+  });
+
+  fixture.setArticleText("第一句。第二句。滚动后加载的第三句。");
+  await fixture.triggerRelevantMutation();
+
+  const starts = fixture.messages.filter(item =>
+    item.kind === "bridge-command" && item.command.type === "start");
+  assert.equal(starts.length, 2);
+  assert.match(starts[1].command.text, /滚动后加载的第三句/);
+  assert.equal(starts[1].command.sessionId, firstStart.sessionId);
+  assert.ok(starts[1].command.commandSeq > firstStart.commandSeq);
 });

@@ -39,3 +39,21 @@ test("文字节点位置可恢复为快照 UTF-16 偏移", () => {
   assert.equal(core.globalOffsetForNode(runs, node, 7), 15);
   assert.equal(core.globalOffsetForNode(runs, {}, 7), null);
 });
+
+test("正文前方插入新内容后可用文字锚点恢复原朗读位置", () => {
+  const previous = "第一段。第二段正在朗读这句较长的中文内容。第三段。";
+  const next = "动态加载的新开头。" + previous + "新增结尾。";
+  const previousOffset = previous.indexOf("正在朗读");
+  const mapped = core.remapOffset(previous, next, previousOffset);
+  assert.equal(next.slice(mapped, mapped + 4), "正在朗读");
+});
+
+test("重复文字锚点优先选择接近原位置的匹配且不切断代理项", () => {
+  const paragraph = "重复段落包含足够长的定位文字🙂结束。";
+  const previous = paragraph.repeat(4);
+  const next = "新增。" + paragraph.repeat(4);
+  const previousOffset = previous.lastIndexOf("🙂");
+  const mapped = core.remapOffset(previous, next, previousOffset);
+  assert.equal(core.isUtf16Boundary(next, mapped), true);
+  assert.ok(mapped > next.length / 2);
+});

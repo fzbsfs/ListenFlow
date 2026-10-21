@@ -16,6 +16,7 @@
   let lastContextSelection = null;
   let toastTimer = null;
   let pointerGesture = null;
+  let rescanTimer = null;
 
   document.addEventListener("contextmenu", rememberContextSelection, true);
   document.addEventListener("pointerdown", rememberPointerDown, true);
@@ -340,10 +341,8 @@
     active.rescanInFlight = true;
     try {
       const previousLength = active.snapshot.text.length;
-      const previousOffset = active.lastProgressOffset;
       const snapshot = buildSnapshot(active.mode);
-      const offset = snapshot.text.length === 0 ? 0
-        : Math.min(previousOffset, snapshot.text.length - 1);
+      const offset = core.remapOffset(active.snapshot.text, snapshot.text, active.lastProgressOffset);
       await startReplacementSnapshot(snapshot, offset);
       if (active) active.invalidated = false;
       showToast(`网页已重新扫描：${previousLength.toLocaleString()} → ${snapshot.text.length.toLocaleString()} 字。`);
@@ -394,45 +393,62 @@
   function observeSnapshot(session) {
     const observer = new MutationObserver(mutations => {
       if (!active || active !== session) return;
-      if (!mutations.some(mutation => affectsSnapshot(session, mutation))) return;
+      if (!mutations.some(mutation => dom.mutationAffectsSnapshot(session.snapshot, mutation))) return;
       session.invalidated = true;
       if (["stopped", "completed"].includes(session.state)) return;
-      const stop = {
-        version: 1,
-        type: "stop",
-        requestId: crypto.randomUUID(),
-        sessionId: session.sessionId,
-        commandSeq: ++session.commandSeq
-      };
       emitDiagnostic("edge-snapshot-invalidated", {
         reason: mutationReason(session, mutations),
         offset: session.lastProgressOffset,
         playbackGeneration: session.generation
       });
-      void forwardCommand(stop).catch(() => {});
-      session.state = "stopping";
-      session.highlighter?.clear();
-      showToast("网页正文已发生变化，播放已停止；再次播放时会重新扫描。");
+      scheduleMutationRescan(session);
     });
     observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     session.observer = observer;
   }
 
-  function affectsSnapshot(session, mutation) {
-    if (mutation.type === "characterData") return session.runNodes.has(mutation.target);
-    for (const node of [...mutation.removedNodes, ...mutation.addedNodes]) {
-      if (session.runNodes.has(node)) return true;
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        for (const runNode of session.runNodes) {
-          if (node.contains(runNode)) return true;
-        }
+  function scheduleMutationRescan(session) {
+    if (rescanTimer) clearTimeout(rescanTimer);
+    rescanTimer = setTimeout(() => {
+      rescanTimer = null;
+      void rescanAfterMutation(session).catch(error => {
+        if (!active || active !== session) return;
+        showToast("网页更新后的重新扫描失败：" + error.message);
+      });
+    }, 700);
+  }
+
+  async function rescanAfterMutation(session) {
+    if (!active || active !== session || active.rescanInFlight || !active.invalidated) return;
+    if (!["speaking", "paused"].includes(active.state)) return;
+    active.rescanInFlight = true;
+    try {
+      const previous = active.snapshot;
+      const snapshot = buildSnapshot(active.mode);
+      const offset = core.remapOffset(previous.text, snapshot.text, active.lastProgressOffset);
+      if (previous.text === snapshot.text && sameRunNodes(previous, snapshot)) {
+        active.invalidated = false;
+        return;
       }
+      if (active.state === "paused")
+        setPendingTarget(snapshot, offset);
+      else
+        await startReplacementSnapshot(snapshot, offset);
+      if (active) active.invalidated = false;
+      showToast(`网页内容已更新并重新扫描：${previous.text.length.toLocaleString()} → ${snapshot.text.length.toLocaleString()} 字。`);
+    } finally {
+      if (active) active.rescanInFlight = false;
     }
-    return false;
+  }
+
+  function sameRunNodes(left, right) {
+    return left.runs.length === right.runs.length && left.runs.every((run, index) =>
+      run.node === right.runs[index].node && run.nodeStart === right.runs[index].nodeStart &&
+      run.nodeEnd === right.runs[index].nodeEnd);
   }
 
   function mutationReason(session, mutations) {
-    const mutation = mutations.find(item => affectsSnapshot(session, item));
+    const mutation = mutations.find(item => dom.mutationAffectsSnapshot(session.snapshot, item));
     if (!mutation) return "unknown";
     return mutation.type === "characterData"
       ? "mapped-character-data"
@@ -458,6 +474,10 @@
   }
 
   function clearActiveSession(message) {
+    if (rescanTimer) {
+      clearTimeout(rescanTimer);
+      rescanTimer = null;
+    }
     if (active) {
       active.observer?.disconnect();
       active.highlighter?.clear();
@@ -471,6 +491,7 @@
     document.querySelector(".listenflow-status-toast")?.remove();
     const toast = document.createElement("div");
     toast.className = "listenflow-status-toast";
+    toast.setAttribute?.("data-listenflow-owned", "true");
     toast.textContent = message;
     document.documentElement.appendChild(toast);
     clearTimeout(toastTimer);

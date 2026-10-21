@@ -42,8 +42,11 @@ function fixture() {
       return selector.split(",").some(value => {
         const part = value.trim();
         const attribute = /^\[([^=]+)='([^']*)'\]$/.exec(part);
-        return attribute ? this.attributes[attribute[1]] === attribute[2]
-          : this.tagName.toLowerCase() === part;
+        const bareAttribute = /^\[([^=]+)\]$/.exec(part);
+        if (attribute) return this.attributes[attribute[1]] === attribute[2];
+        if (bareAttribute) return Object.hasOwn(this.attributes, bareAttribute[1]);
+        if (part.startsWith(".")) return String(this.attributes.class ?? "").split(/\s+/).includes(part.slice(1));
+        return this.tagName.toLowerCase() === part;
       });
     }
     closest(selector) {
@@ -309,4 +312,26 @@ test("离开实际文字矩形或文档节点已卸载时不扩展", () => {
   assert.equal(env.api.resolveReadingTarget(snapshot, 500, 500), null);
   root.parentElement = null;
   assert.equal(env.api.resolveReadingTarget(snapshot, 10, 10), null);
+});
+
+test("正文根节点追加可读内容会使快照失效但扩展自有提示不会", () => {
+  const env = fixture();
+  const root = env.element("main");
+  env.body.append(root);
+  addParagraph(env, root, "原有正文内容足够长。".repeat(4));
+  const snapshot = env.api.buildArticleSnapshot();
+
+  const added = env.element("p");
+  added.append(env.text("滚动后加载的新正文。"));
+  root.append(added);
+  assert.equal(env.api.mutationAffectsSnapshot(snapshot, {
+    type: "childList", target: root, addedNodes: [added], removedNodes: []
+  }), true);
+
+  const owned = env.element("div", { class: "listenflow-status-toast", "data-listenflow-owned": "true" });
+  owned.append(env.text("ListenFlow 提示"));
+  root.append(owned);
+  assert.equal(env.api.mutationAffectsSnapshot(snapshot, {
+    type: "childList", target: root, addedNodes: [owned], removedNodes: []
+  }), false);
 });
