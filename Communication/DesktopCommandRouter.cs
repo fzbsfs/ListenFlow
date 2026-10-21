@@ -12,6 +12,7 @@ public sealed class DesktopCommandRouter : IDisposable
         "resume",
         "stop",
         "seek",
+        "set-rate",
         "progress:utf-16",
         "session-generation"
     ];
@@ -112,6 +113,9 @@ public sealed class DesktopCommandRouter : IDisposable
                     if (!ProtocolValidator.IsUtf16Boundary(_target.Text, command.Offset!.Value))
                         return Error(command, "invalid_offset", "定位位置超出当前快照或切断了 UTF-16 代理项。", true);
                     _target.Seek(command.Offset.Value);
+                    break;
+                case ProtocolConstants.Types.SetRate:
+                    _target.SetRate(command.Rate!.Value);
                     break;
                 default:
                     return Error(command, "unknown_command", "不支持的播放命令。", true);

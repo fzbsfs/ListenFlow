@@ -27,6 +27,7 @@ public static class ProtocolValidator
             ProtocolConstants.Types.Hello or ProtocolConstants.Types.Ping => ProtocolValidationResult.Success,
             ProtocolConstants.Types.Start => ValidateStart(message),
             ProtocolConstants.Types.Seek => ValidateSeek(message),
+            ProtocolConstants.Types.SetRate => ValidateRate(message),
             ProtocolConstants.Types.Pause or ProtocolConstants.Types.Resume or ProtocolConstants.Types.Stop =>
                 ValidateSessionCommand(message),
             _ => Fail("unknown_command", "未知消息类型：" + message.Type)
@@ -71,6 +72,15 @@ public static class ProtocolValidator
         if (!common.IsValid) return common;
         if (message.Offset is null or < 0)
             return Fail("invalid_offset", "定位消息缺少有效的非负 UTF-16 偏移。");
+        return ProtocolValidationResult.Success;
+    }
+
+    private static ProtocolValidationResult ValidateRate(BridgeMessage message)
+    {
+        var session = ValidateSessionCommand(message);
+        if (!session.IsValid) return session;
+        if (message.Rate is null or < -10 or > 10)
+            return Fail("invalid_rate", "语速必须在 -10 到 10 之间。");
         return ProtocolValidationResult.Success;
     }
 

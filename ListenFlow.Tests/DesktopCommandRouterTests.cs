@@ -127,6 +127,20 @@ public sealed class DesktopCommandRouterTests
         Assert.Equal(context.ThreadId, eventThread);
     }
 
+    [Fact]
+    public void SetRate_在活动会话中立即交给播放目标()
+    {
+        using var context = new DedicatedThreadSynchronizationContext();
+        var target = new FakeRemotePlaybackTarget();
+        using var router = new DesktopCommandRouter(target, context);
+        router.Handle(StartCommand(1));
+
+        var response = router.Handle(SessionCommand(ProtocolConstants.Types.SetRate, 2) with { Rate = 4 });
+
+        Assert.Equal(ProtocolConstants.Types.Ack, response.Type);
+        Assert.Equal(4, target.Rate);
+    }
+
     private static BridgeMessage StartCommand(long commandSeq) => new()
     {
         Type = ProtocolConstants.Types.Start,
@@ -173,6 +187,7 @@ public sealed class DesktopCommandRouterTests
         public string Text { get; private set; } = string.Empty;
         public PlaybackState PlaybackState { get; private set; } = PlaybackState.Ready;
         public long PlaybackGeneration { get; private set; }
+        public int Rate { get; private set; }
 
         public void Start(RemoteStartRequest request)
         {
@@ -208,6 +223,8 @@ public sealed class DesktopCommandRouterTests
             PlaybackGeneration++;
             Raise(offset, new TextRange(offset, 0));
         }
+
+        public void SetRate(int rate) => Rate = rate;
 
         public void EmitProgress(int position, int length) =>
             Raise(position, new TextRange(position, length));

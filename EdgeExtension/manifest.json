@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ListenFlow 网页听读",
   "description": "使用本机 ListenFlow 和 Windows SAPI 离线朗读网页正文。",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAriRZvxN5InD6om5NZonOtUokMkdiawiXBEfn13V1LafQKJwni9Tndn4Fc11Nc1Ek3VcAfgumD/NM2M2u5nFjLK0TdsN5kpPB8cZMOaVVLunB2XdkJJj7sOY4QmV1HaIJTdhzUfSr+4bd2i604NaYNt9iWttifBCqGx4lAdheBzfAFtB+NWd29IB1loI9HQzvnv53IUzYNaFPmCcnH3ajDbu0wHy53NYnsSA2+IKf2mxXbRiI9lsubIhbXoueN/YAIQ0FbzEY57mLFbrItUtj0FEi/CWbSGTap+0n3hMD2XZSn0A5E7KrUZXn1JnwpzHFz8ZY1aaGMbyam+rNmecqLQIDAQAB",
   "permissions": [
     "contextMenus",

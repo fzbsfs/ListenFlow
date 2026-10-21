@@ -63,6 +63,24 @@ public sealed class ProtocolTests
         Assert.Equal("invalid_snapshot_version", result.Code);
     }
 
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(10, true)]
+    [InlineData(11, false)]
+    public void SetRate_只接受活动会话允许的语速范围(int rate, bool expected)
+    {
+        var result = ProtocolValidator.ValidateCommand(new BridgeMessage
+        {
+            Type = ProtocolConstants.Types.SetRate,
+            SessionId = "session-1",
+            CommandSeq = 2,
+            Rate = rate
+        });
+
+        Assert.Equal(expected, result.IsValid);
+        if (!expected) Assert.Equal("invalid_rate", result.Code);
+    }
+
     [Fact]
     public async Task 长度前缀流_分片读取后完整往返中文消息()
     {

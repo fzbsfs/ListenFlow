@@ -1,24 +1,26 @@
-ListenFlow 0.2.0 网页专项修复诊断版
+ListenFlow 0.2.1 网页听读版
 ====================================
 
-这不是正式发布版本。它用于验收网页自由滚动、JavaGuide 长文诊断，以及飞书选区朗读后的左键定位。
+本版本增加完整页面文字扫描、停止后从主界面播放时重新扫描并恢复网页高亮，以及网页右键语速控制。
 
 一、安装与数据隔离
 
 1. 解压整个压缩包，关闭正在运行的 ListenFlow，然后双击“安装 ListenFlow.cmd”。不需要管理员权限，也不会修改默认浏览器。
 2. 默认安装目录：%LOCALAPPDATA%\Programs\ListenFlow-EdgeTest
-3. 本诊断版的数据目录：%LOCALAPPDATA%\ListenFlow-EdgeTest\Data
+3. 本版本的数据目录：%LOCALAPPDATA%\ListenFlow-EdgeTest\Data
 4. 原 0.2.0 数据目录仍为：%LOCALAPPDATA%\ListenFlow
-5. 两者完全分开；安装和运行诊断版不会覆盖原 0.2.0 的进度、历史或日志。
+5. 两者完全分开；安装和运行 0.2.1 不会覆盖原 0.2.0 的进度、历史或日志。
 6. 在 edge://extensions/ 开启“开发人员模式”，点击“加载解压缩的扩展”，选择：
    %LOCALAPPDATA%\Programs\ListenFlow-EdgeTest\extension
 7. 确认扩展标识：chdkljcgemgeljdnfdnblbelfhmkkfbp
+
+网页右键菜单提供“重新扫描并朗读网页正文”“朗读页面全部可见文字”和四档语速。默认语速为 +2；朗读中切换语速会从当前位置重新建立本地播放队列。
 
 Edge 不允许普通脚本静默安装解压缩扩展，因此第 6 步需要手动完成一次。
 
 二、自由滚动与小林 Coding 回归
 
-1. 打开 https://www.xiaolincoding.com/ ，右键选择“使用 ListenFlow 朗读网页正文”。
+1. 打开 https://www.xiaolincoding.com/ ，右键选择“重新扫描并朗读网页正文”。
 2. 确认 Xiaoxiao 朗读，网页原文黄色高亮跟随实际语音进度。
 3. 用滚轮、滚动条或触控板向下移动数屏并停留，确认页面不会被高亮强制拉回。
 4. 滚回当前朗读句，确认高亮仍在正确原文位置。
@@ -29,7 +31,7 @@ Edge 不允许普通脚本静默安装解压缩扩展，因此第 6 步需要手
 
 目标地址：https://javaguide.cn/java/basis/java-basic-questions-01.html
 
-1. 右键朗读网页正文，记录是否开始发声、停止前大致时长及页面提示文字。
+1. 右键选择“重新扫描并朗读网页正文”，记录扫描字数、是否开始发声、停止前大致时长及页面提示文字。
 2. 验证跨多个段落和代码块持续朗读、高亮、左键定位。
 3. 若无声、停止或报错，不要反复覆盖现场；先停止并关闭 ListenFlow。
 4. 双击“导出诊断日志.cmd”，桌面会生成 ListenFlow-diagnostics-日期时间.zip。
@@ -57,11 +59,11 @@ Edge 不允许普通脚本静默安装解压缩扩展，因此第 6 步需要手
 
 所有语音、正文提取、位置映射和诊断均在本机完成。自包含 EXE 不包含 Windows 语音包，电脑仍须安装可由 SAPI 使用的 Microsoft Xiaoxiao。
 
-六、卸载与回退
+六、卸载
 
 1. 在 edge://extensions/ 移除“ListenFlow 网页听读”。
 2. 双击“卸载 ListenFlow.cmd”，或从开始菜单运行卸载入口。
-3. 卸载会恢复安装前的 Native Messaging Host 注册（如果原来存在），并保留诊断数据目录。
-4. 原 0.2.0 程序和 %LOCALAPPDATA%\ListenFlow 数据不受影响，可直接重新启动原版本。
+3. 卸载会恢复安装前的 Native Messaging Host 注册（如果原来存在），并保留本地阅读数据目录。
+4. 如需删除本地阅读数据，可运行 PowerShell 卸载脚本并显式使用 RemoveUserData 参数。
 
 已知边界：Edge 内部页和扩展商店不能注入；封闭 Shadow DOM、跨 frame 文档或虚拟化后已卸载的文字节点不能通过字符串猜测定位。两个飞书真实页面仍需在已登录环境人工验收；JavaGuide 的用户现场停止原因需由本诊断包日志确认。

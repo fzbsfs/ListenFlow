@@ -79,5 +79,6 @@ public sealed class DesktopPipeServerTests
         public void Resume() => PlaybackState = PlaybackState.Speaking;
         public void Stop() => PlaybackState = PlaybackState.Stopped;
         public void Seek(int offset) => PlaybackGeneration++;
+        public void SetRate(int rate) { }
     }
 }

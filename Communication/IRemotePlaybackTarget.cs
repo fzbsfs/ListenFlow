@@ -27,4 +27,5 @@ public interface IRemotePlaybackTarget
     void Resume();
     void Stop();
     void Seek(int offset);
+    void SetRate(int rate);
 }

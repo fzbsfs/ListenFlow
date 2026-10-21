@@ -33,13 +33,42 @@
   }
 
   function buildArticleSnapshot() {
+    const candidates = [];
     const roots = readabilityRoots();
-    const nodes = readableTextNodes(document.body).filter(node =>
-      roots.some(root => root === node.parentElement || root.contains(node)));
-    const slices = nodes.map(node => ({ node, start: 0, end: node.data.length }));
-    const snapshot = buildSnapshotFromSlices(slices, "article", roots[0] ?? document.body, document.title);
+    if (roots.length > 0) {
+      const nodes = readableTextNodes(document.body).filter(node =>
+        roots.some(root => root === node.parentElement || root.contains(node)));
+      if (nodes.length > 0)
+        candidates.push(buildSnapshotFromNodes(nodes, "article", roots[0], "readability"));
+    }
+
+    const structuralRoot = findFallbackArticleRoot();
+    if (structuralRoot !== document.body || candidates.length === 0) {
+      const nodes = readableTextNodes(structuralRoot);
+      if (nodes.length > 0)
+        candidates.push(buildSnapshotFromNodes(nodes, "article", structuralRoot, "structural"));
+    }
+
+    const snapshot = candidates.sort((left, right) => right.text.length - left.text.length)[0];
+    if (!snapshot)
+      throw new Error("没有在当前网页中识别到可朗读的正文文字。");
     if (snapshot.text.trim().length < 20)
       throw new Error("没有在当前网页中识别到足够的正文文字。");
+    return snapshot;
+  }
+
+  function buildPageSnapshot() {
+    const nodes = readableTextNodes(document.body);
+    const snapshot = buildSnapshotFromNodes(nodes, "page", document.body, "full-page");
+    if (snapshot.text.trim().length < 20)
+      throw new Error("当前页面没有足够的可见文字。");
+    return snapshot;
+  }
+
+  function buildSnapshotFromNodes(nodes, source, root, extraction) {
+    const slices = nodes.map(node => ({ node, start: 0, end: node.data.length }));
+    const snapshot = buildSnapshotFromSlices(slices, source, root, document.title);
+    snapshot.extraction = extraction;
     return snapshot;
   }
 
@@ -94,11 +123,14 @@
         console.debug("ListenFlow Readability 映射失败，使用本地结构回退。", error);
       }
     }
-    return [findFallbackArticleRoot()];
+    return [];
   }
 
   function findFallbackArticleRoot() {
-    const direct = document.querySelector("article, main, [role='main']");
+    const direct = [...document.querySelectorAll("article, main, [role='main']")]
+      .filter(element => !element.closest(excludedSelector))
+      .map(element => ({ element, score: visibleTextLength(element) }))
+      .sort((left, right) => right.score - left.score)[0]?.element;
     if (direct) return direct;
     const candidates = [...document.body.querySelectorAll("section, div")]
       .filter(element => !element.closest(excludedSelector))
@@ -256,6 +288,7 @@
   global.ListenFlowDomSnapshot = Object.freeze({
     buildSelectionSnapshot,
     buildArticleSnapshot,
+    buildPageSnapshot,
     locatePoint,
     resolveReadingTarget,
     isEditableTargetAllowed,

@@ -10,6 +10,7 @@
     "[role='button']", "[role='link']", "[role='menuitem']", "[role='toolbar']"
   ].join(",");
   const editableSelector = "[contenteditable]:not([contenteditable='false'])";
+  const defaultRate = 2;
 
   let active = null;
   let lastContextSelection = null;
@@ -33,11 +34,13 @@
 
   async function handleExtensionMessage(message) {
     if (message?.kind === "context-action") {
-      if (message.action === "start-selection") return startReading("selection");
-      if (message.action === "start-article") return startReading("article");
+      if (message.action === "start-selection") return startReading("selection", message.rate);
+      if (message.action === "start-article") return startReading("article", message.rate);
+      if (message.action === "start-page") return startReading("page", message.rate);
       if (message.action === "pause") return sendControl("pause");
       if (message.action === "resume") return sendControl("resume");
       if (message.action === "stop") return sendControl("stop");
+      if (message.action === "set-rate") return sendControl("set-rate", message.rate);
     }
     if (message?.kind === "bridge-event") return applyBridgeEvent(message.message);
     if (message?.kind === "session-replaced") {
@@ -46,12 +49,10 @@
     }
   }
 
-  async function startReading(mode) {
+  async function startReading(mode, requestedRate = defaultRate) {
     clearActiveSession();
     const extractionStarted = performance.now();
-    const snapshot = mode === "selection"
-      ? dom.buildSelectionSnapshot(lastContextSelection)
-      : dom.buildArticleSnapshot();
+    const snapshot = buildSnapshot(mode);
     const sessionId = crypto.randomUUID();
     const snapshotId = crypto.randomUUID();
     const snapshotVersion = Date.now();
@@ -68,7 +69,11 @@
       observer: null,
       lastProgressOffset: 0,
       hasProgress: false,
-      hasHighlighted: false
+      hasHighlighted: false,
+      mode,
+      rate: normalizeRate(requestedRate),
+      rescanInFlight: false,
+      invalidated: false
     };
     emitDiagnostic("edge-snapshot-created", {
       textLength: snapshot.text.length,
@@ -90,14 +95,16 @@
       text: snapshot.text,
       title: snapshot.title,
       sourceUri: location.href,
-      voiceName: "Microsoft Xiaoxiao"
+      voiceName: "Microsoft Xiaoxiao",
+      rate: active.rate
     };
     await forwardCommand(command);
     emitDiagnostic("edge-start-posted", { textLength: snapshot.text.length, source: mode });
-    showToast(mode === "selection" ? "正在朗读所选文字。" : "正在朗读网页正文。左键点击正文可重新定位。");
+    const label = mode === "selection" ? "所选文字" : mode === "page" ? "页面全部可见文字" : "网页正文";
+    showToast(`已重新扫描 ${snapshot.text.length.toLocaleString()} 字，正在朗读${label}。`);
   }
 
-  async function sendControl(type) {
+  async function sendControl(type, requestedRate) {
     if (!active) throw new Error("当前网页没有活动的 ListenFlow 朗读会话。");
     if (type === "resume" && active.pending)
       return startPendingSnapshot();
@@ -108,8 +115,13 @@
       sessionId: active.sessionId,
       commandSeq: ++active.commandSeq
     };
+    if (type === "set-rate") {
+      active.rate = normalizeRate(requestedRate);
+      command.rate = active.rate;
+    }
     if (type === "stop") active.state = "stopping";
     await forwardCommand(command);
+    if (type === "set-rate") showToast(`语速已调整为 ${active.rate >= 0 ? "+" : ""}${active.rate}。`);
   }
 
   async function forwardCommand(command) {
@@ -136,13 +148,27 @@
     }
 
     if (message.type === "state") {
+      const previousState = active.state;
       active.state = message.state;
+      if (message.state === "speaking" && ["stopped", "completed"].includes(previousState)) {
+        void rescanAfterDesktopRestart().catch(error => {
+          if (active) active.state = "speaking";
+          showToast("重新扫描失败，继续使用上次快照：" + error.message);
+        });
+        return;
+      }
       if (["speaking", "paused"].includes(message.state) && Number.isInteger(message.offset))
         highlightSentence(message.offset);
       if (message.state === "error")
         showToast("ListenFlow 播放错误：" + (message.message ?? message.code ?? "未知错误"));
-      if (["stopped", "completed", "error"].includes(message.state))
-        clearActiveSession(message.state === "completed" ? "朗读完成。" : undefined);
+      if (["stopped", "completed"].includes(message.state)) {
+        active.highlighter?.clear();
+        active.pending?.highlighter?.clear();
+        active.pending = null;
+        active.hasHighlighted = false;
+        if (message.state === "completed") showToast("朗读完成；点击主界面播放会重新扫描当前网页。");
+      }
+      if (message.state === "error") clearActiveSession();
       return;
     }
 
@@ -297,7 +323,8 @@
       text: active.snapshot.text,
       title: active.snapshot.title,
       sourceUri: location.href,
-      voiceName: "Microsoft Xiaoxiao"
+      voiceName: "Microsoft Xiaoxiao",
+      rate: active.rate
     };
     emitDiagnostic("edge-snapshot-replaced", {
       offset,
@@ -306,6 +333,33 @@
       source: active.snapshot.source
     });
     await forwardCommand(command);
+  }
+
+  async function rescanAfterDesktopRestart() {
+    if (!active || active.rescanInFlight) return;
+    active.rescanInFlight = true;
+    try {
+      const previousLength = active.snapshot.text.length;
+      const previousOffset = active.lastProgressOffset;
+      const snapshot = buildSnapshot(active.mode);
+      const offset = snapshot.text.length === 0 ? 0
+        : Math.min(previousOffset, snapshot.text.length - 1);
+      await startReplacementSnapshot(snapshot, offset);
+      if (active) active.invalidated = false;
+      showToast(`网页已重新扫描：${previousLength.toLocaleString()} → ${snapshot.text.length.toLocaleString()} 字。`);
+    } finally {
+      if (active) active.rescanInFlight = false;
+    }
+  }
+
+  function buildSnapshot(mode) {
+    if (mode === "selection") return dom.buildSelectionSnapshot(lastContextSelection);
+    if (mode === "page") return dom.buildPageSnapshot();
+    return dom.buildArticleSnapshot();
+  }
+
+  function normalizeRate(value) {
+    return Number.isInteger(value) ? Math.max(-10, Math.min(10, value)) : defaultRate;
   }
 
   function highlightSnapshotRange(snapshot, highlighter, offset) {
@@ -341,6 +395,8 @@
     const observer = new MutationObserver(mutations => {
       if (!active || active !== session) return;
       if (!mutations.some(mutation => affectsSnapshot(session, mutation))) return;
+      session.invalidated = true;
+      if (["stopped", "completed"].includes(session.state)) return;
       const stop = {
         version: 1,
         type: "stop",
@@ -354,7 +410,9 @@
         playbackGeneration: session.generation
       });
       void forwardCommand(stop).catch(() => {});
-      clearActiveSession("网页正文已发生变化，请重新启动朗读。");
+      session.state = "stopping";
+      session.highlighter?.clear();
+      showToast("网页正文已发生变化，播放已停止；再次播放时会重新扫描。");
     });
     observer.observe(document.body, { subtree: true, childList: true, characterData: true });
     session.observer = observer;

@@ -84,14 +84,15 @@ async function waitUntil(check, description, timeoutMs = 15000) {
   throw new Error(`等待超时：${description}；最后状态=${JSON.stringify(last)}`);
 }
 
-async function sendContextAction(worker, action) {
+async function sendContextAction(worker, action, rate) {
   const expression = `(async () => {
     const tabs = await chrome.tabs.query({ url: ${JSON.stringify(pageUrl)} });
     const tab = tabs.find(item => item.active) ?? tabs[0];
     if (!tab) throw new Error("没有找到测试标签页");
     return chrome.tabs.sendMessage(tab.id, {
       kind: "context-action",
-      action: ${JSON.stringify(action)}
+      action: ${JSON.stringify(action)},
+      rate: ${JSON.stringify(rate)}
     }, { frameId: 0 });
   })()`;
   const response = await evaluate(worker, expression);
@@ -236,6 +237,14 @@ async function main() {
   assert.ok(customHighlightVisible || first.overlayCount > 0, "高亮范围存在，但视觉高亮没有生效。");
   await saveScreenshot("01-实际进度高亮");
   console.log(`通过：实际进度已在网页原文高亮：${first.text}`);
+
+  await sendContextAction(worker, "set-rate", 4);
+  const rateChanged = await waitUntil(async () => {
+    const value = await readHighlight();
+    return value.toast.includes("+4") ? value : null;
+  }, "右键语速命令穿过原生通信链路");
+  assert.ok(rateChanged.count > 0 || rateChanged.overlayCount > 0, "调整语速后网页高亮应继续存在");
+  console.log("通过：网页语速命令已由本地播放核心接受，高亮会话保持活动。");
 
   const manualScroll = await evaluate(page, `(() => {
     const maximum = Math.max(0, document.documentElement.scrollHeight - innerHeight);

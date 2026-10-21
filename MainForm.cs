@@ -189,6 +189,7 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
         });
         _rateBox.Minimum = -10;
         _rateBox.Maximum = 10;
+        _rateBox.Value = 2;
         _rateBox.Width = 58;
         _rateBox.ValueChanged += (_, _) =>
         {
@@ -737,6 +738,21 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
             throw new InvalidOperationException("本地语音尚未成功初始化。");
         EnsureDocumentSynchronized();
         _reader.SeekTo(offset);
+        MarkStateDirty();
+        SaveStateIfDirty(updateHistory: true);
+    }
+
+    void IRemotePlaybackTarget.SetRate(int rate)
+    {
+        if (_reader is null)
+            throw new InvalidOperationException("本地语音尚未成功初始化。");
+        var clamped = Math.Clamp(rate, (int)_rateBox.Minimum, (int)_rateBox.Maximum);
+        var wasSpeaking = _reader.State == PlaybackState.Speaking;
+        var position = _reader.Position;
+        _rateBox.Value = clamped;
+        _reader.Rate = clamped;
+        if (wasSpeaking)
+            _reader.SeekAndPlay(position);
         MarkStateDirty();
         SaveStateIfDirty(updateHistory: true);
     }

@@ -84,7 +84,7 @@ function Stop-RunningDesktopApp([string]$TargetExecutablePath) {
         }
         if (-not $runningPath -or
             -not [string]::Equals($runningPath, $targetFull, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "请先正常关闭其他位置正在运行的 ListenFlow，再安装人工验收版。进程号：$($runningApp.Id)"
+            throw "请先正常关闭其他位置正在运行的 ListenFlow，再安装 0.2.1。进程号：$($runningApp.Id)"
         }
 
         for ($attempt = 0; $attempt -lt 20 -and -not $runningApp.HasExited; $attempt++) {
@@ -196,7 +196,7 @@ if (-not [string]::Equals($registeredManifest, $manifestFull, [StringComparison]
 }
 
 $installationInfo = [ordered]@{
-    version = "0.2.0-web-fixes-diagnostic"
+    version = "0.2.1"
     extensionId = $expectedExtensionId
     nativeHostName = $nativeHostName
     installRoot = $installFull
@@ -213,14 +213,22 @@ $installationInfo = [ordered]@{
 
 if (-not $SkipShortcut) {
     New-Item -ItemType Directory -Path $StartMenuDirectory -Force | Out-Null
+    foreach ($legacyShortcut in @(
+        "ListenFlow Edge 人工验收版.lnk",
+        "卸载 ListenFlow Edge 人工验收版.lnk")) {
+        $legacyShortcutPath = Join-Path $StartMenuDirectory $legacyShortcut
+        if (Test-Path -LiteralPath $legacyShortcutPath -PathType Leaf) {
+            Remove-Item -LiteralPath $legacyShortcutPath -Force
+        }
+    }
     $shell = New-Object -ComObject WScript.Shell
-    $appShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "ListenFlow Edge 人工验收版.lnk"))
+    $appShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "ListenFlow 0.2.1.lnk"))
     $appShortcut.TargetPath = $installedApp
     $appShortcut.WorkingDirectory = Split-Path -Parent $installedApp
     $appShortcut.Description = "ListenFlow 本地听读助手"
     $appShortcut.Save()
 
-    $uninstallShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "卸载 ListenFlow Edge 人工验收版.lnk"))
+    $uninstallShortcut = $shell.CreateShortcut((Join-Path $StartMenuDirectory "卸载 ListenFlow 0.2.1.lnk"))
     $uninstallShortcut.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
     $uninstallScript = Join-Path $installFull "tools\Uninstall-ListenFlow.ps1"
     $uninstallShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
@@ -242,7 +250,7 @@ if (-not $SkipAppLaunch) {
 }
 
 Write-Host ""
-Write-Host "ListenFlow 人工验收版安装完成。"
+Write-Host "ListenFlow 0.2.1 安装完成。"
 Write-Host "主程序：$installedApp"
 Write-Host "扩展目录：$installedExtension"
 Write-Host "扩展固定标识：$expectedExtensionId"

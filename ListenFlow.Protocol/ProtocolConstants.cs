@@ -17,6 +17,7 @@ public static class ProtocolConstants
         public const string Resume = "resume";
         public const string Stop = "stop";
         public const string Seek = "seek";
+        public const string SetRate = "set-rate";
         public const string Ping = "ping";
         public const string Ready = "ready";
         public const string Ack = "ack";
@@ -35,6 +36,7 @@ public static class ProtocolConstants
         Types.Resume,
         Types.Stop,
         Types.Seek,
+        Types.SetRate,
         Types.Ping
     };
 }

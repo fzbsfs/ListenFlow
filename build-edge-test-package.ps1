@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot "artifacts\ListenFlow-0.2.0-Edge人工验收-x64"),
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot "artifacts\ListenFlow-0.2.1-Windows-x64"),
     [string]$DotNetPath,
     [switch]$RunVoiceIntegrationTests
 )
@@ -71,7 +71,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $hostPublish "ListenFlow.NativeHost.exe") -Destination $payloadApp
     [IO.File]::WriteAllText(
         (Join-Path $payloadApp "edge-test-isolated-data.marker"),
-        "ListenFlow Edge test data is isolated from the regular 0.2.0 profile.",
+        "ListenFlow 0.2.1 data is isolated from the regular 0.2.0 profile.",
         (New-Object Text.UTF8Encoding($false)))
 
     Write-Host "[5/7] 复制离线 Edge 扩展与安装工具"
@@ -116,7 +116,7 @@ try {
     $commit = (& git -C $PSScriptRoot rev-parse HEAD).Trim()
     $buildInfo = [ordered]@{
         product = "ListenFlow"
-        version = "0.2.0-web-fixes-diagnostic"
+        version = "0.2.1"
         platform = "win-x64"
         selfContained = $true
         extensionId = "chdkljcgemgeljdnfdnblbelfhmkkfbp"

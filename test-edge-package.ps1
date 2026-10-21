@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$PackageDirectory = (Join-Path $PSScriptRoot "artifacts\ListenFlow-0.2.0-Edge人工验收-x64"),
+    [string]$PackageDirectory = (Join-Path $PSScriptRoot "artifacts\ListenFlow-0.2.1-Windows-x64"),
     [string]$DotNetPath
 )
 
@@ -51,6 +51,9 @@ function Invoke-CmdEntry([string]$EntryPath, [string[]]$Arguments) {
 
 if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $startMenu "ListenFlow Edge 人工验收版.lnk"), "legacy")
+[IO.File]::WriteAllText((Join-Path $startMenu "卸载 ListenFlow Edge 人工验收版.lnk"), "legacy")
 [IO.File]::WriteAllText($previousManifest, '{"name":"previous.test.host"}', (New-Object Text.UTF8Encoding($false)))
 New-Item -Path $registryPath -Force | Out-Null
 Set-Item -LiteralPath $registryPath -Value $previousManifest
@@ -65,7 +68,7 @@ try {
         "-ManifestDirectory", $manifestDirectory,
         "-RegistryPath", $registryPath,
         "-StartMenuDirectory", $startMenu,
-        "-SkipEdgeLaunch", "-SkipAppLaunch", "-SkipShortcut")
+        "-SkipEdgeLaunch", "-SkipAppLaunch")
 
     Write-Host "[1/6] 使用 Windows CMD 入口执行隔离安装"
     $installExitCode = Invoke-CmdEntry $installEntry $installArguments
@@ -76,6 +79,16 @@ try {
     $extensionManifest = Join-Path $installRoot "extension\manifest.json"
     foreach ($required in @($app, $hostExecutable, $extensionManifest)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "安装后文件缺失：$required" }
+    }
+    foreach ($shortcut in @("ListenFlow 0.2.1.lnk", "卸载 ListenFlow 0.2.1.lnk")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $startMenu $shortcut) -PathType Leaf)) {
+            throw "安装后快捷方式缺失：$shortcut"
+        }
+    }
+    foreach ($legacyShortcut in @("ListenFlow Edge 人工验收版.lnk", "卸载 ListenFlow Edge 人工验收版.lnk")) {
+        if (Test-Path -LiteralPath (Join-Path $startMenu $legacyShortcut)) {
+            throw "安装后仍保留旧版快捷方式：$legacyShortcut"
+        }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $installRoot "app\edge-test-isolated-data.marker"))) {
         throw "验收版缺少独立数据目录标记。"
@@ -131,9 +144,12 @@ try {
         "-RegistryPath", $registryPath,
         "-StartMenuDirectory", $startMenu,
         "-DataRoot", $dataRoot,
-        "-RemoveUserData", "-SkipEdgeLaunch", "-SkipShortcut")
+        "-RemoveUserData", "-SkipEdgeLaunch")
     if ($uninstallExitCode -ne 0) { throw "CMD 入口隔离卸载失败：$uninstallExitCode" }
     if (Test-Path -LiteralPath $installRoot) { throw "卸载后安装目录仍然存在。" }
+    if (@(Get-ChildItem -LiteralPath $startMenu -Filter "*.lnk" -ErrorAction SilentlyContinue).Count -ne 0) {
+        throw "卸载后仍保留 ListenFlow 快捷方式。"
+    }
     if (-not (Test-Path -LiteralPath $registryPath)) { throw "卸载后没有恢复原有测试注册。" }
     $restoredManifest = (Get-Item -LiteralPath $registryPath).GetValue("")
     if (-not [string]::Equals($restoredManifest, $previousManifest, [StringComparison]::OrdinalIgnoreCase)) {

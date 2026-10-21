@@ -2,10 +2,24 @@ const NATIVE_HOST_NAME = "com.listenflow.native_host";
 const MENU = Object.freeze({
   selection: "listenflow-read-selection",
   article: "listenflow-read-article",
+  page: "listenflow-read-page",
   pause: "listenflow-pause",
   resume: "listenflow-resume",
-  stop: "listenflow-stop"
+  stop: "listenflow-stop",
+  speed: "listenflow-speed",
+  rate0: "listenflow-rate-0",
+  rate2: "listenflow-rate-2",
+  rate4: "listenflow-rate-4",
+  rate6: "listenflow-rate-6"
 });
+
+const RATE_BY_MENU = new Map([
+  [MENU.rate0, 0],
+  [MENU.rate2, 2],
+  [MENU.rate4, 4],
+  [MENU.rate6, 6]
+]);
+let preferredRate = 2;
 
 let nativePort = null;
 const sessions = new Map();
@@ -19,7 +33,12 @@ chrome.runtime.onInstalled.addListener(() => {
     });
     chrome.contextMenus.create({
       id: MENU.article,
-      title: "使用 ListenFlow 朗读网页正文",
+      title: "重新扫描并朗读网页正文",
+      contexts: ["page", "selection"]
+    });
+    chrome.contextMenus.create({
+      id: MENU.page,
+      title: "朗读页面全部可见文字",
       contexts: ["page", "selection"]
     });
     chrome.contextMenus.create({
@@ -30,20 +49,33 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: MENU.pause, title: "暂停 ListenFlow", contexts: ["page", "selection"] });
     chrome.contextMenus.create({ id: MENU.resume, title: "继续 ListenFlow", contexts: ["page", "selection"] });
     chrome.contextMenus.create({ id: MENU.stop, title: "停止 ListenFlow", contexts: ["page", "selection"] });
+    chrome.contextMenus.create({ id: MENU.speed, title: "ListenFlow 语速", contexts: ["page", "selection"] });
+    chrome.contextMenus.create({ id: MENU.rate0, parentId: MENU.speed, title: "较慢（0）", contexts: ["page", "selection"] });
+    chrome.contextMenus.create({ id: MENU.rate2, parentId: MENU.speed, title: "默认较快（+2）", contexts: ["page", "selection"] });
+    chrome.contextMenus.create({ id: MENU.rate4, parentId: MENU.speed, title: "快速（+4）", contexts: ["page", "selection"] });
+    chrome.contextMenus.create({ id: MENU.rate6, parentId: MENU.speed, title: "很快（+6）", contexts: ["page", "selection"] });
   });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (!tab?.id) return;
+  const selectedRate = RATE_BY_MENU.get(info.menuItemId);
+  if (selectedRate != null) preferredRate = selectedRate;
   const action = info.menuItemId === MENU.selection ? "start-selection"
     : info.menuItemId === MENU.article ? "start-article"
+      : info.menuItemId === MENU.page ? "start-page"
       : info.menuItemId === MENU.pause ? "pause"
         : info.menuItemId === MENU.resume ? "resume"
           : info.menuItemId === MENU.stop ? "stop"
+            : selectedRate != null ? "set-rate"
             : null;
   if (!action) return;
   postBrowserDiagnostic("edge-menu-clicked", { state: action, frameId: info.frameId ?? 0 });
-  void ensureContentAndSend(tab.id, info.frameId ?? 0, { kind: "context-action", action });
+  void ensureContentAndSend(tab.id, info.frameId ?? 0, {
+    kind: "context-action",
+    action,
+    rate: selectedRate ?? preferredRate
+  });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -108,7 +140,8 @@ function registerCommand(command, tabId, frameId) {
   if (command.type === "start") {
     for (const [sessionId, existing] of sessions) {
       if (sessionId === command.sessionId) continue;
-      void sendToFrame(existing, { kind: "session-replaced" });
+      if (existing.tabId !== tabId || existing.frameId !== frameId)
+        void sendToFrame(existing, { kind: "session-replaced" });
       sessions.delete(sessionId);
     }
     sessions.set(command.sessionId, {
@@ -129,7 +162,7 @@ function routeNativeMessage(message) {
   if (message?.sessionId && sessions.has(message.sessionId)) {
     const session = sessions.get(message.sessionId);
     void sendToFrame(session, { kind: "bridge-event", message });
-    if (message.type === "state" && ["stopped", "completed", "error"].includes(message.state))
+    if (message.type === "state" && message.state === "error")
       sessions.delete(message.sessionId);
     return;
   }

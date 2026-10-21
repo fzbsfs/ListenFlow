@@ -51,6 +51,11 @@ function fixture() {
         if (current.matches(selector)) return current;
       return null;
     }
+    querySelectorAll(selector) {
+      const descendants = this.childNodes.flatMap(child =>
+        child.nodeType === 1 ? [child, ...child.querySelectorAll(selector)] : []);
+      return descendants.filter(element => element.matches(selector));
+    }
   }
   class Text {
     constructor(data) { this.nodeType = 3; this.data = data; this.parentElement = null; }
@@ -65,6 +70,7 @@ function fixture() {
   html.append(body);
   const document = {
     body, documentElement: html, title: "固定文档夹具",
+    querySelectorAll(selector) { return html.querySelectorAll(selector); },
     createTreeWalker(root, kind, filter) {
       const nodes = textNodes(root).filter(node => filter.acceptNode(node) === 1);
       let index = -1;
@@ -111,6 +117,27 @@ function fixture() {
     }
   };
 }
+
+test("智能正文选取文字最多的语义正文区域且完整页面模式保留全部可见文字", () => {
+  const env = fixture();
+  const navigation = env.element("nav");
+  const shortMain = env.element("main");
+  const longMain = env.element("main");
+  env.body.append(navigation, shortMain, longMain);
+  addParagraph(env, navigation, "导航文字不会进入智能正文。".repeat(8));
+  addParagraph(env, shortMain, "短正文。".repeat(8));
+  addParagraph(env, longMain, "较长的完整正文。".repeat(30));
+
+  const article = env.api.buildArticleSnapshot();
+  const page = env.api.buildPageSnapshot();
+
+  assert.match(article.text, /较长的完整正文/);
+  assert.doesNotMatch(article.text, /导航文字/);
+  assert.equal(article.root, longMain);
+  assert.ok(page.text.length > article.text.length);
+  assert.match(page.text, /导航文字/);
+  assert.equal(page.source, "page");
+});
 
 function addParagraph(environment, root, text, tag = "p") {
   const node = environment.text(text);

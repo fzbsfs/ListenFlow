@@ -77,6 +77,8 @@ if (-not $SkipShortcut) {
     foreach ($shortcut in @(
         "ListenFlow Edge 人工验收版.lnk",
         "卸载 ListenFlow Edge 人工验收版.lnk",
+        "ListenFlow 0.2.1.lnk",
+        "卸载 ListenFlow 0.2.1.lnk",
         "导出 ListenFlow 诊断日志.lnk")) {
         $path = Join-Path $StartMenuDirectory $shortcut
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
