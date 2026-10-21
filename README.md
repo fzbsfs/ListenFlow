@@ -2,6 +2,20 @@
 
 ListenFlow 是面向 Windows 的本地长文本听读工具。程序使用系统已安装、可由 SAPI 访问的语音，不接入在线语音、云端人工智能、在线文字识别、账号、遥测或云同步。
 
+## 下载安装
+
+从 [GitHub 发布页面](https://github.com/fzbsfs/ListenFlow/releases) 下载 Windows x64 测试包，解压后运行 `安装 ListenFlow.cmd`。安装包包含自包含桌面程序、本地通信宿主、Edge 扩展及安装和卸载脚本。
+
+首次安装扩展时，在 Edge 的 `edge://extensions/` 页面启用开发者模式，选择“加载解压缩的扩展”，选择 `%LOCALAPPDATA%\Programs\ListenFlow\extension`。升级后点击“重新加载”，并刷新需要朗读的网页。当前尚未上架扩展商店，脚本不能承诺自动完成首次浏览器扩展加载。
+
+当前预发布版本为 **0.2.2**。安装包不包含微软语音模型，也尚未提供自动下载语音的一键脚本。请先确保本机存在可供 SAPI 调用的中文离线语音。
+
+开发机实际使用自然语音 SAPI 适配器 0.2.6 和本地 Xiaoxiao 1.0.9.0；这不是所有 Windows 安装后默认具备的配置。适配器来源：[NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter)。其上游同时支持在线语音；本项目的离线配置要求禁用 Edge 和 Azure 在线语音，并在断网环境验证本地合成。第三方语音模型不适用本项目的 MIT 许可证，未随本仓库分发。
+
+## 开源许可
+
+项目原创代码采用 [MIT 许可证](LICENSE)。随仓库提供的 Mozilla Readability 保留其 [独立许可证](EdgeExtension/vendor/READABILITY-LICENSE.md)。微软系统语音、语音模型及第三方适配器分别遵循其自身许可。
+
 ## 当前功能
 
 - 优先选择本机 `Microsoft Xiaoxiao` 中文语音，找不到时优先选择其他 `zh-CN` 本地语音。
