@@ -79,7 +79,7 @@ try {
         "-DataRoot", $dataRoot,
         "-LegacyInstallRoot", $legacyInstallRoot,
         "-LegacyDataRoot", $legacyDataRoot,
-        "-SkipEdgeLaunch", "-SkipAppLaunch")
+        "-SkipEdgeLaunch", "-SkipAppLaunch", "-AllowOtherListenFlowProcesses")
 
     Write-Host "[1/6] 使用 Windows CMD 入口执行隔离安装"
     $installExitCode = Invoke-CmdEntry $installEntry $installArguments

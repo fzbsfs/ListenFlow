@@ -9,7 +9,8 @@ param(
     [string]$LegacyDataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow-EdgeTest"),
     [switch]$SkipEdgeLaunch,
     [switch]$SkipAppLaunch,
-    [switch]$SkipShortcut
+    [switch]$SkipShortcut,
+    [switch]$AllowOtherListenFlowProcesses
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,6 +91,7 @@ function Stop-RunningDesktopApp([string[]]$ManagedExecutablePaths) {
         try { $runningPath = [IO.Path]::GetFullPath($runningApp.MainModule.FileName) } catch {
         }
         if (-not $runningPath -or -not $managed.ContainsKey($runningPath)) {
+            if ($AllowOtherListenFlowProcesses) { continue }
             throw "请先正常关闭其他未知位置正在运行的 ListenFlow，再安装 $productVersion。进程号：$($runningApp.Id)"
         }
 
