@@ -10,6 +10,8 @@ ListenFlow 是面向 Windows 的本地长文本听读工具。程序使用系统
 
 当前预发布版本为 **0.2.2**。安装包不包含微软语音模型，也尚未提供自动下载语音的一键脚本。请先确保本机存在可供 SAPI 调用的中文离线语音。
 
+也可下载仓库根目录的 `Install-ListenFlow.ps1`，用 Windows PowerShell 运行。它会下载上述固定版本安装包、验证 SHA256 后调用统一安装器；已有安装包时可传入 `-PackagePath` 离线安装。`-PrepareOnly` 只校验和解压，不安装。该入口不下载语音模型。
+
 开发机实际使用自然语音 SAPI 适配器 0.2.6 和本地 Xiaoxiao 1.0.9.0；这不是所有 Windows 安装后默认具备的配置。适配器来源：[NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter)。其上游同时支持在线语音；本项目的离线配置要求禁用 Edge 和 Azure 在线语音，并在断网环境验证本地合成。第三方语音模型不适用本项目的 MIT 许可证，未随本仓库分发。
 
 ## 开源许可
