@@ -394,6 +394,12 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
 
     private void PreviewSelectedVoice()
     {
+        if (_previewSynthesizer is not null)
+        {
+            StopVoicePreview();
+            _statusLabel.Text = "已停止语音试听。";
+            return;
+        }
         if (_reader?.State is PlaybackState.Speaking or PlaybackState.Paused)
         {
             _statusLabel.Text = "请先暂停或停止正文朗读，再试听语音。";
