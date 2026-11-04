@@ -1,4 +1,5 @@
 using System.Text;
+using System.Speech.Synthesis;
 using ListenFlow.Communication;
 using ListenFlow.Core;
 using ListenFlow.Diagnostics;
@@ -13,6 +14,9 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
 
     private readonly TextBox _editor = new();
     private readonly ComboBox _voiceBox = new();
+    private readonly Button _refreshVoicesButton = new();
+    private readonly Button _previewVoiceButton = new();
+    private readonly Button _speechSettingsButton = new();
     private readonly ComboBox _historyBox = new();
     private readonly NumericUpDown _rateBox = new();
     private readonly Label _statusLabel = new();
@@ -29,6 +33,7 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
     private readonly System.Windows.Forms.Timer _saveTimer = new() { Interval = 1000 };
 
     private SapiSpeechService? _speechService;
+    private SpeechSynthesizer? _previewSynthesizer;
     private ReaderController? _reader;
     private ReaderState? _restoredState;
     private string? _filePath;
@@ -181,6 +186,18 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
         _voiceBox.Width = 230;
         _voiceBox.SelectedIndexChanged += VoiceSelectionChanged;
         footer.Controls.Add(_voiceBox);
+        _refreshVoicesButton.Text = "刷新语音";
+        _refreshVoicesButton.AutoSize = true;
+        _refreshVoicesButton.Click += (_, _) => RefreshVoices();
+        footer.Controls.Add(_refreshVoicesButton);
+        _previewVoiceButton.Text = "试听";
+        _previewVoiceButton.AutoSize = true;
+        _previewVoiceButton.Click += (_, _) => PreviewSelectedVoice();
+        footer.Controls.Add(_previewVoiceButton);
+        _speechSettingsButton.Text = "Windows 语音设置";
+        _speechSettingsButton.AutoSize = true;
+        _speechSettingsButton.Click += (_, _) => OpenSpeechSettings();
+        footer.Controls.Add(_speechSettingsButton);
         footer.Controls.Add(new Label
         {
             Text = "语速（-10 至 +10）：",
@@ -325,6 +342,7 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
     private void VoiceSelectionChanged(object? sender, EventArgs eventArgs)
     {
         if (_initializingVoices || _loading) return;
+        StopVoicePreview();
         ApplySelectedVoice();
         MarkStateDirty();
     }
@@ -334,12 +352,110 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
         if (_speechService is null || _voiceBox.SelectedItem is not VoiceItem selected) return;
         try
         {
-            _speechService.SelectVoice(selected.Name);
+            StopVoicePreview();
+            _reader?.SelectVoice(selected.Name);
             _statusLabel.Text = "已选择本机语音：" + selected.Name + "（" + selected.Culture + "）";
+            MarkStateDirty();
+            SaveStateIfDirty(updateHistory: true);
         }
         catch (Exception exception)
         {
-            _statusLabel.Text = "无法选择本地语音：" + exception.Message;
+            _initializingVoices = true;
+            SelectVoiceByName(_speechService.SelectedVoiceName ?? string.Empty);
+            _initializingVoices = false;
+            _statusLabel.Text = "无法切换本地语音：" + exception.Message;
+        }
+    }
+
+    private void RefreshVoices()
+    {
+        if (_speechService is null) return;
+        try
+        {
+            var selectedName = _speechService.SelectedVoiceName;
+            StopVoicePreview();
+            var voices = _speechService.RefreshVoices();
+            _initializingVoices = true;
+            _voiceBox.Items.Clear();
+            foreach (var voice in voices.Where(voice => voice.Enabled))
+                _voiceBox.Items.Add(new VoiceItem(voice.Name, voice.Culture));
+            _initializingVoices = false;
+            SelectVoiceByName(selectedName ?? string.Empty);
+            if (_voiceBox.SelectedItem is null && _voiceBox.Items.Count > 0)
+                _voiceBox.SelectedIndex = 0;
+            _statusLabel.Text = $"已刷新本地语音，发现 {_voiceBox.Items.Count} 个可用语音。";
+        }
+        catch (Exception exception)
+        {
+            _initializingVoices = false;
+            _statusLabel.Text = "刷新本地语音失败：" + exception.Message;
+        }
+    }
+
+    private void PreviewSelectedVoice()
+    {
+        if (_previewSynthesizer is not null)
+        {
+            StopVoicePreview();
+            _statusLabel.Text = "已停止语音试听。";
+            return;
+        }
+        if (_reader?.State is PlaybackState.Speaking or PlaybackState.Paused)
+        {
+            _statusLabel.Text = "请先暂停或停止正文朗读，再试听语音。";
+            return;
+        }
+        if (_voiceBox.SelectedItem is not VoiceItem selected) return;
+        try
+        {
+            StopVoicePreview();
+            _previewSynthesizer = new SpeechSynthesizer();
+            _previewSynthesizer.SetOutputToDefaultAudioDevice();
+            _previewSynthesizer.SelectVoice(selected.Name);
+            _previewSynthesizer.Rate = Math.Clamp((int)_rateBox.Value, -10, 10);
+            var preview = _previewSynthesizer;
+            preview.SpeakCompleted += (_, _) => Ui(() =>
+            {
+                if (!ReferenceEquals(_previewSynthesizer, preview)) return;
+                preview.Dispose();
+                _previewSynthesizer = null;
+                _previewVoiceButton.Text = "试听";
+            });
+            _previewVoiceButton.Text = "停止试听";
+            _previewSynthesizer.SpeakAsync(selected.Culture.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+                ? "你好，欢迎使用 ListenFlow。本地语音试听。"
+                : "Hello. Welcome to ListenFlow. This is a local voice preview.");
+        }
+        catch (Exception exception)
+        {
+            StopVoicePreview();
+            _statusLabel.Text = "语音试听失败：" + exception.Message;
+        }
+    }
+
+    private void StopVoicePreview()
+    {
+        var preview = _previewSynthesizer;
+        _previewSynthesizer = null;
+        if (preview is null) return;
+        try { preview.SpeakAsyncCancelAll(); }
+        catch { }
+        preview.Dispose();
+        _previewVoiceButton.Text = "试听";
+    }
+
+    private void OpenSpeechSettings()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:speech")
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception)
+        {
+            _statusLabel.Text = "无法打开 Windows 语音设置：" + exception.Message;
         }
     }
 
@@ -581,6 +697,9 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
         _previousButton.Enabled = _reader is not null && hasText && !speaking && !paused;
         _nextButton.Enabled = _reader is not null && hasText && !speaking && !paused;
         _voiceBox.Enabled = _speechService is not null && !speaking && !paused;
+        _refreshVoicesButton.Enabled = _speechService is not null && !speaking && !paused;
+        _previewVoiceButton.Enabled = _speechService is not null && !speaking && !paused;
+        _speechSettingsButton.Enabled = true;
         _historyBox.Enabled = !speaking && !paused;
         _rateBox.Enabled = !speaking && !paused;
         _editor.ReadOnly = speaking || paused;
@@ -667,6 +786,7 @@ internal sealed class MainForm : Form, IRemotePlaybackTarget
     private void MainForm_FormClosing(object? sender, FormClosingEventArgs eventArgs)
     {
         _saveTimer.Stop();
+        StopVoicePreview();
         _stateDirty = true;
         SaveStateIfDirty(updateHistory: true);
         _closing = true;

@@ -23,17 +23,7 @@ public sealed class SapiSpeechService : ISpeechService
             _synthesizer.SpeakStarted += OnSpeakStarted;
             _synthesizer.SpeakProgress += OnSpeakProgress;
             _synthesizer.SpeakCompleted += OnSpeakCompleted;
-            Voices = _synthesizer.GetInstalledVoices()
-                .Select(voice => new LocalVoice(
-                    voice.VoiceInfo.Name,
-                    voice.VoiceInfo.Culture.Name,
-                    voice.Enabled))
-                .GroupBy(voice => voice.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group
-                    .OrderByDescending(voice => voice.Enabled)
-                    .ThenBy(voice => voice.Culture, StringComparer.OrdinalIgnoreCase)
-                    .First())
-                .ToArray();
+            Voices = EnumerateVoices();
         }
         catch
         {
@@ -45,8 +35,37 @@ public sealed class SapiSpeechService : ISpeechService
     public event EventHandler<SpeechProgressEventArgs>? Progressed;
     public event EventHandler<SpeechCompletedEventArgs>? Completed;
 
-    public IReadOnlyList<LocalVoice> Voices { get; }
+    public IReadOnlyList<LocalVoice> Voices { get; private set; }
     public string? SelectedVoiceName => _disposed ? null : _synthesizer.Voice?.Name;
+
+    public IReadOnlyList<LocalVoice> RefreshVoices()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var selectedName = SelectedVoiceName;
+        Voices = EnumerateVoices();
+        if (!string.IsNullOrWhiteSpace(selectedName) &&
+            Voices.Any(voice => voice.Enabled &&
+                string.Equals(voice.Name, selectedName, StringComparison.OrdinalIgnoreCase)))
+        {
+            _synthesizer.SelectVoice(selectedName);
+        }
+        return Voices;
+    }
+
+    private IReadOnlyList<LocalVoice> EnumerateVoices() =>
+        _synthesizer.GetInstalledVoices()
+            .Select(voice => new LocalVoice(
+                voice.VoiceInfo.Name,
+                voice.VoiceInfo.Culture.Name,
+                voice.Enabled))
+            .GroupBy(voice => voice.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(voice => voice.Enabled)
+                .ThenBy(voice => voice.Culture, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .OrderBy(voice => voice.Culture, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(voice => voice.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     public void SelectVoice(string name)
     {
