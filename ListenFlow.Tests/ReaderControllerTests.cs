@@ -22,6 +22,65 @@ public sealed class ReaderControllerTests
     }
 
     [Fact]
+    public void SelectVoice_朗读中切换语音_从最后进度继续且旧回调失效()
+    {
+        var speech = new FakeSpeechService();
+        using var controller = CreateController(speech);
+        const string text = "第一段。第二段。第三段。";
+        controller.SetDocument(text, 0);
+        controller.Play();
+        var oldPrompt = speech.PendingPromptIds.First();
+        speech.EmitProgress(oldPrompt, 2, 1);
+        var target = controller.Position;
+        var oldGeneration = controller.Generation;
+        var requestCount = speech.Requests.Count;
+
+        controller.SelectVoice("Microsoft Huihui");
+
+        Assert.Equal("Microsoft Huihui", speech.SelectedVoiceName);
+        Assert.Equal(PlaybackState.Speaking, controller.State);
+        Assert.True(controller.Generation > oldGeneration);
+        Assert.Contains("CancelAll", speech.ControlCalls);
+        Assert.True(speech.Requests.Count > requestCount);
+        var firstNewRequest = speech.Requests[requestCount];
+        Assert.Equal(text.Substring(target, firstNewRequest.Text.Length), firstNewRequest.Text);
+
+        speech.EmitProgress(oldPrompt, 0, 1);
+        Assert.Equal(target, controller.Position);
+        var newPrompt = speech.PendingPromptIds.First();
+        speech.EmitProgress(newPrompt, 1, 1);
+        Assert.Equal(target + 1, controller.Position);
+    }
+
+    [Fact]
+    public void SelectVoice_暂停期间切换语音_保持暂停并在恢复后使用新语音()
+    {
+        var speech = new FakeSpeechService();
+        using var controller = CreateController(speech);
+        const string text = "第一段。第二段。第三段。";
+        controller.SetDocument(text, 0);
+        controller.Play();
+        var oldPrompt = speech.PendingPromptIds.First();
+        speech.EmitProgress(oldPrompt, 2, 1);
+        controller.Pause();
+        var target = controller.Position;
+        var requestCount = speech.Requests.Count;
+
+        controller.SelectVoice("Microsoft Huihui");
+
+        Assert.Equal(PlaybackState.Paused, controller.State);
+        Assert.Equal(requestCount, speech.Requests.Count);
+        Assert.Equal("Microsoft Huihui", speech.SelectedVoiceName);
+
+        controller.Resume();
+
+        Assert.Equal(PlaybackState.Speaking, controller.State);
+        Assert.True(speech.Requests.Count > requestCount);
+        var resumedRequest = speech.Requests[requestCount];
+        Assert.Equal(text.Substring(target, resumedRequest.Text.Length), resumedRequest.Text);
+    }
+
+    [Fact]
     public void SetDocument_旧会话回调到达_不污染新文章的进度或状态()
     {
         var speech = new FakeSpeechService();
@@ -357,7 +416,10 @@ public sealed class ReaderControllerTests
         public Exception? CancelException { get; set; }
         public IReadOnlyCollection<Guid> PendingPromptIds => _pendingPromptIds;
         public IReadOnlyList<LocalVoice> Voices { get; } =
-            [new LocalVoice("Microsoft Xiaoxiao", "zh-CN", true)];
+        [
+            new LocalVoice("Microsoft Xiaoxiao", "zh-CN", true),
+            new LocalVoice("Microsoft Huihui", "zh-CN", true)
+        ];
         public string? SelectedVoiceName { get; private set; }
 
         public void SelectVoice(string name)
