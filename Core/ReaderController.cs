@@ -155,6 +155,51 @@ public sealed class ReaderController : IDisposable
         ResumeCore();
     });
 
+    public void SelectVoice(string name) => Invoke(() =>
+    {
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("语音名称不能为空。", nameof(name));
+        if (string.Equals(_speech.SelectedVoiceName, name, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var previousState = _state;
+        var previousVoiceName = _speech.SelectedVoiceName;
+        if (!CancelCurrentSession("切换本地语音"))
+            throw new InvalidOperationException(_errorMessage ?? "切换语音前无法安全停止当前朗读。");
+
+        try
+        {
+            _speech.SelectVoice(name);
+        }
+        catch (Exception exception)
+        {
+            if (!string.IsNullOrWhiteSpace(previousVoiceName))
+            {
+                try { _speech.SelectVoice(previousVoiceName); }
+                catch { }
+            }
+
+            _nextChunkIndex = FindChunkIndex(_position);
+            _state = previousState;
+            if (_state == PlaybackState.Speaking)
+                FillQueue();
+            if (_state != PlaybackState.Error)
+                RaiseChanged();
+
+            throw new InvalidOperationException("切换本地语音失败：" + exception.Message, exception);
+        }
+
+        _nextChunkIndex = FindChunkIndex(_position);
+        _spokenRange = new TextRange(_position, 0);
+        _errorMessage = null;
+        _state = previousState;
+        if (_state == PlaybackState.Speaking)
+            FillQueue();
+        if (_state != PlaybackState.Error)
+            RaiseChanged();
+    });
+
     public void Stop() => Invoke(() =>
     {
         ThrowIfDisposed();
