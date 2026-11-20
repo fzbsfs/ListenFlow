@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 $expectedExtensionId = "chdkljcgemgeljdnfdnblbelfhmkkfbp"
 $nativeHostName = "com.listenflow.native_host"
-$productVersion = "0.2.2"
+$productVersion = "0.2.4"
 $packageRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $payloadRoot = Join-Path $packageRoot "payload"
 $checksumsPath = Join-Path $packageRoot "checksums.json"

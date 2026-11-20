@@ -148,6 +148,27 @@ function addParagraph(environment, root, text, tag = "p") {
   return node;
 }
 
+test("人工智能回复仅提取当前回复正文，并可选择包含代码块", () => {
+  const env = fixture();
+  const reply = env.element("div", { "data-message-author-role": "assistant" });
+  const other = env.element("div");
+  env.body.append(reply, other);
+  const first = addParagraph(env, reply, "第一段回复。");
+  const code = addParagraph(env, reply, "print('测试')", "pre");
+  const second = addParagraph(env, reply, "第二段回复。");
+  addParagraph(env, reply, "朗读此回复", "button");
+  addParagraph(env, other, "其他消息不应被提取。");
+  const without = env.api.buildElementSnapshot(reply, false);
+  const withCode = env.api.buildElementSnapshot(reply, true);
+  assert.match(without.text, /第一段回复/);
+  assert.match(without.text, /第二段回复/);
+  assert.doesNotMatch(without.text, /print|朗读此回复|其他消息/);
+  assert.match(withCode.text, /print/);
+  assert.equal(without.runs[0].node, first);
+  assert.equal(without.runs.at(-1).node, second);
+  assert.ok(withCode.runs.some(run => run.node === code));
+});
+
 test("选区初次快照只包含所选字符并保留明确的文档定位范围", () => {
   const env = fixture();
   const article = env.element("article");

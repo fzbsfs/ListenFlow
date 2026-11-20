@@ -17,6 +17,7 @@
   let toastTimer = null;
   let pointerGesture = null;
   let rescanTimer = null;
+  let aiReader = null;
 
   document.addEventListener("contextmenu", rememberContextSelection, true);
   document.addEventListener("pointerdown", rememberPointerDown, true);
@@ -32,6 +33,12 @@
       });
     return true;
   });
+  aiReader = global.ListenFlowAIReader?.install({
+    start: (element, includeCode) => startReading("ai", defaultRate, element, includeCode),
+    control: (type, rate) => sendControl(type, rate),
+    reset: () => { if (active?.mode === "ai") void sendControl("stop").catch(error => showToast(String(error?.message ?? error))); },
+    error: error => showToast(String(error?.message ?? error))
+  }) ?? null;
 
   async function handleExtensionMessage(message) {
     if (message?.kind === "context-action") {
@@ -45,15 +52,20 @@
     }
     if (message?.kind === "bridge-event") return applyBridgeEvent(message.message);
     if (message?.kind === "session-replaced") {
+      aiReader?.onState("stopped");
       clearActiveSession("朗读已切换到另一网页。");
       return;
     }
   }
 
-  async function startReading(mode, requestedRate = defaultRate) {
-    clearActiveSession();
+  async function startReading(mode, requestedRate = defaultRate, aiTarget = null, includeCode = false) {
     const extractionStarted = performance.now();
-    const snapshot = buildSnapshot(mode);
+    const snapshot = mode === "ai" ? dom.buildElementSnapshot(aiTarget, includeCode) : buildSnapshot(mode);
+    if (mode === "ai" && (snapshot.text.length > 5_000_000 ||
+        new TextEncoder().encode(JSON.stringify({ text: snapshot.text })).length > 8 * 1024 * 1024 - 8192))
+      throw new Error("回复过长，超出本机通信上限；请选取部分文字朗读。");
+    if (mode !== "ai") aiReader?.onState("stopped");
+    clearActiveSession();
     const sessionId = crypto.randomUUID();
     const snapshotId = crypto.randomUUID();
     const snapshotVersion = Date.now();
@@ -72,7 +84,9 @@
       hasProgress: false,
       hasHighlighted: false,
       mode,
-      rate: normalizeRate(requestedRate),
+      aiTarget,
+      includeCode,
+      rate: mode === "ai" ? null : normalizeRate(requestedRate),
       rescanInFlight: false,
       invalidated: false
     };
@@ -96,12 +110,11 @@
       text: snapshot.text,
       title: snapshot.title,
       sourceUri: location.href,
-      voiceName: "Microsoft Xiaoxiao",
       rate: active.rate
     };
     await forwardCommand(command);
     emitDiagnostic("edge-start-posted", { textLength: snapshot.text.length, source: mode });
-    const label = mode === "selection" ? "所选文字" : mode === "page" ? "页面全部可见文字" : "网页正文";
+    const label = mode === "ai" ? "人工智能回复" : mode === "selection" ? "所选文字" : mode === "page" ? "页面全部可见文字" : "网页正文";
     showToast(`已重新扫描 ${snapshot.text.length.toLocaleString()} 字，正在朗读${label}。`);
   }
 
@@ -144,6 +157,7 @@
 
     if (message.type === "error") {
       showToast("ListenFlow 错误：" + (message.message ?? message.code));
+      if (active.mode === "ai") aiReader?.onState("error");
       if (message.recoverable === false) clearActiveSession();
       return;
     }
@@ -167,9 +181,10 @@
         active.pending?.highlighter?.clear();
         active.pending = null;
         active.hasHighlighted = false;
-        if (message.state === "completed") showToast("朗读完成；点击主界面播放会重新扫描当前网页。");
+        if (active.mode === "ai") aiReader?.onState(message.state);
+        else if (message.state === "completed") showToast("朗读完成；点击主界面播放会重新扫描当前网页。");
       }
-      if (message.state === "error") clearActiveSession();
+      if (message.state === "error") { aiReader?.onState("error"); clearActiveSession(); }
       return;
     }
 
@@ -324,7 +339,6 @@
       text: active.snapshot.text,
       title: active.snapshot.title,
       sourceUri: location.href,
-      voiceName: "Microsoft Xiaoxiao",
       rate: active.rate
     };
     emitDiagnostic("edge-snapshot-replaced", {
@@ -352,6 +366,7 @@
   }
 
   function buildSnapshot(mode) {
+    if (mode === "ai") return dom.buildElementSnapshot(active.aiTarget, active.includeCode);
     if (mode === "selection") return dom.buildSelectionSnapshot(lastContextSelection);
     if (mode === "page") return dom.buildPageSnapshot();
     return dom.buildArticleSnapshot();

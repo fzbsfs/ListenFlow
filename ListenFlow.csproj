@@ -3,18 +3,26 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ListenFlow</AssemblyName>
     <RootNamespace>ListenFlow</RootNamespace>
-    <Version>0.2.2</Version>
+    <Version>0.2.4</Version>
+    <ApplicationIcon>Assets\ListenFlow.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
     <PackageReference Include="System.Speech" Version="10.0.13" />
+    <EmbeddedResource Include="Assets\ListenFlow.ico" LogicalName="ListenFlow.AppIcon.ico" />
+    <EmbeddedResource Include="Assets\Mascot\mascot-playing-bust.png" LogicalName="ListenFlow.Mascot.playing.png" />
+    <EmbeddedResource Include="Assets\Mascot\mascot-paused-bust.png" LogicalName="ListenFlow.Mascot.paused.png" />
+    <EmbeddedResource Include="Assets\Mascot\mascot-happy-bust.png" LogicalName="ListenFlow.Mascot.happy.png" />
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="artifacts\**\*.cs;backups\**\*.cs" />
     <Compile Remove="ListenFlow.Tests\**\*.cs" />
     <Compile Remove="ListenFlow.Protocol\**\*.cs" />
     <Compile Remove="ListenFlow.NativeHost\**\*.cs" />

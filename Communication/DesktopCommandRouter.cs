@@ -35,6 +35,7 @@ public sealed class DesktopCommandRouter : IDisposable
         _stateContext = stateContext ?? throw new ArgumentNullException(nameof(stateContext));
         _diagnostic = diagnostic;
         _target.PlaybackChanged += OnPlaybackChanged;
+        _target.LocalPlaybackStarting += OnLocalPlaybackStarting;
     }
 
     public event EventHandler<BridgeMessage>? Outbound;
@@ -62,7 +63,28 @@ public sealed class DesktopCommandRouter : IDisposable
         if (_disposed) return;
         _disposed = true;
         _target.PlaybackChanged -= OnPlaybackChanged;
+        _target.LocalPlaybackStarting -= OnLocalPlaybackStarting;
     }
+
+    private void OnLocalPlaybackStarting(object? sender, EventArgs eventArgs) => Invoke(() =>
+    {
+        if (_disposed || _sessionId is null) return true;
+        Outbound?.Invoke(this, new BridgeMessage
+        {
+            Type = ProtocolConstants.Types.Error,
+            SessionId = _sessionId,
+            SnapshotId = _snapshotId,
+            SnapshotVersion = _snapshotVersion,
+            Code = "session_replaced",
+            Message = "本地内容已接管朗读，网页会话已结束。",
+            Recoverable = false
+        });
+        _sessionId = null;
+        _snapshotId = null;
+        _snapshotVersion = null;
+        _lastCommandSeq = -1;
+        return true;
+    });
 
     private BridgeMessage HandleCore(BridgeMessage command)
     {

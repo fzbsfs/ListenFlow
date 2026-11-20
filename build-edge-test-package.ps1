@@ -13,12 +13,16 @@ $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
 $env:DOTNET_CLI_HOME = Join-Path $PSScriptRoot ".dotnet-home"
 
 $dotnet = if ($DotNetPath) { (Resolve-Path -LiteralPath $DotNetPath).Path } else { (Get-Command dotnet -ErrorAction Stop).Source }
-$productVersion = "0.2.2"
+$productVersion = "0.2.4"
 $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "artifacts"))
 $outputFull = [IO.Path]::GetFullPath($OutputDirectory)
+$zipPath = Join-Path $artifactsRoot "ListenFlow-$productVersion-Windows-x64.zip"
 $artifactsPrefix = $artifactsRoot.TrimEnd('\') + '\'
 if (-not $outputFull.StartsWith($artifactsPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw "输出目录必须位于仓库 artifacts 目录内：$outputFull"
+}
+if ((Test-Path -LiteralPath $outputFull) -or (Test-Path -LiteralPath $zipPath)) {
+    throw "测试目录或压缩包已存在，请先备份并移走，避免覆盖现有版本。"
 }
 
 $stage = Join-Path $artifactsRoot (".edge-package-" + [Guid]::NewGuid().ToString("N"))
@@ -79,7 +83,7 @@ try {
     }
     $extensionFiles = @(
         "manifest.json", "background.js", "content-script.js", "content.css",
-        "dom-snapshot.js", "highlighter.js", "snapshot-core.js"
+        "dom-snapshot.js", "highlighter.js", "snapshot-core.js", "ai-reader.js"
     )
     foreach ($file in $extensionFiles) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot "EdgeExtension\$file") -Destination $payloadExtension
@@ -146,21 +150,14 @@ try {
         $utf8NoBom)
 
     Write-Host "[7/7] 生成可解压安装包"
-    if (Test-Path -LiteralPath $outputFull) { Remove-Item -LiteralPath $outputFull -Recurse -Force }
+    if ((Test-Path -LiteralPath $outputFull) -or (Test-Path -LiteralPath $zipPath)) {
+        throw "测试目录或压缩包在构建期间已出现，已停止以避免覆盖。"
+    }
     Move-Item -LiteralPath $packageStage -Destination $outputFull
-    $zipPath = Join-Path $artifactsRoot "ListenFlow-$productVersion-Windows-x64.zip"
-    if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Compress-Archive -LiteralPath $outputFull -DestinationPath $zipPath -CompressionLevel Optimal
 
     $zipInfo = Get-Item -LiteralPath $zipPath
     $zipHash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256
-    Get-ChildItem -LiteralPath $artifactsRoot -Force | Where-Object {
-        $_.FullName -ne $outputFull -and $_.FullName -ne $zipPath -and
-        ($_.Name -like "ListenFlow-*.zip" -or
-         ($_.PSIsContainer -and ($_.Name -like "ListenFlow-*" -or $_.Name -like ".edge-package-*")))
-    } | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force
-    }
     Write-Host "人工验收目录：$outputFull"
     Write-Host "人工验收压缩包：$zipPath"
     Write-Host "压缩包大小：$($zipInfo.Length) 字节"

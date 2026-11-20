@@ -16,6 +16,7 @@ public sealed record RemoteStartRequest(
 public interface IRemotePlaybackTarget
 {
     event EventHandler<ReaderChangedEventArgs>? PlaybackChanged;
+    event EventHandler? LocalPlaybackStarting;
 
     int TextLength { get; }
     string Text { get; }

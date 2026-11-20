@@ -1,4 +1,4 @@
-ListenFlow 0.2.2 网页长文与统一安装版
+ListenFlow 0.2.4 桌面听读测试版
 ====================================
 
 一、版本与目录
@@ -17,7 +17,7 @@ ListenFlow 0.2.2 网页长文与统一安装版
 3. 如果安装时 Edge 已经打开，磁盘文件虽然已经更新，但 Edge 内存中可能仍运行旧扩展。请打开 edge://extensions/，在“ListenFlow 网页听读”卡片上点击一次“重新加载”；也可以关闭所有 Edge 窗口后重新打开。
 4. 如果尚未加载扩展，请在 edge://extensions/ 开启开发人员模式，点击“加载解压缩的扩展”，选择：
    %LOCALAPPDATA%\Programs\ListenFlow\extension
-5. 确认扩展版本为 0.2.2，标识为 chdkljcgemgeljdnfdnblbelfhmkkfbp。
+5. 确认扩展版本为 0.2.4，标识为 chdkljcgemgeljdnfdnblbelfhmkkfbp。
 
 三、长网页扫描验收
 

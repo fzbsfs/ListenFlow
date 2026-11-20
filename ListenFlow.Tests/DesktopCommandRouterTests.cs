@@ -7,6 +7,48 @@ namespace ListenFlow.Tests;
 public sealed class DesktopCommandRouterTests
 {
     [Fact]
+    public void 本地内容接管_结束网页会话且后续进度不会发往旧网页()
+    {
+        using var context = new DedicatedThreadSynchronizationContext();
+        var target = new FakeRemotePlaybackTarget();
+        using var router = new DesktopCommandRouter(target, context);
+        var outbound = new List<BridgeMessage>();
+        router.Outbound += (_, message) => outbound.Add(message);
+        router.Handle(StartCommand(1));
+        target.BeginLocalPlayback();
+        var replaced = Assert.Single(outbound, item => item.Code == "session_replaced");
+        Assert.False(replaced.Recoverable);
+        Assert.Equal("session-1", replaced.SessionId);
+        var previousCount = outbound.Count;
+        target.EmitProgress(1, 1);
+        Assert.Equal(previousCount, outbound.Count);
+        var response = router.Handle(SessionCommand(ProtocolConstants.Types.Pause, 2));
+        Assert.Equal("no_active_session", response.Code);
+    }
+
+    [Fact]
+    public void 桌面语音切换_新播放代次与进度保留原网页会话()
+    {
+        using var context = new DedicatedThreadSynchronizationContext();
+        var target = new FakeRemotePlaybackTarget();
+        using var router = new DesktopCommandRouter(target, context);
+        var outbound = new List<BridgeMessage>();
+        router.Outbound += (_, message) => outbound.Add(message);
+        router.Handle(StartCommand(1));
+        var oldGeneration = target.PlaybackGeneration;
+
+        target.SimulateVoiceSwitch(3);
+        target.EmitProgress(3, 2);
+
+        var progress = Assert.Single(outbound, item => item.Type == ProtocolConstants.Types.Progress);
+        Assert.Equal(oldGeneration + 1, progress.PlaybackGeneration);
+        Assert.Equal("session-1", progress.SessionId);
+        Assert.Equal("snapshot-1", progress.SnapshotId);
+        Assert.Equal(3, progress.Offset);
+        Assert.Equal(2, progress.Length);
+    }
+
+    [Fact]
     public void Start_建立会话并把真实语音范围映射为进度消息()
     {
         using var context = new DedicatedThreadSynchronizationContext();
@@ -179,6 +221,8 @@ public sealed class DesktopCommandRouterTests
     private sealed class FakeRemotePlaybackTarget : IRemotePlaybackTarget
     {
         public event EventHandler<ReaderChangedEventArgs>? PlaybackChanged;
+        public event EventHandler? LocalPlaybackStarting;
+        public void BeginLocalPlayback() => LocalPlaybackStarting?.Invoke(this, EventArgs.Empty);
 
         public int StartCount { get; private set; }
         public int PauseCount { get; private set; }
@@ -228,6 +272,12 @@ public sealed class DesktopCommandRouterTests
 
         public void EmitProgress(int position, int length) =>
             Raise(position, new TextRange(position, length));
+
+        public void SimulateVoiceSwitch(int position)
+        {
+            PlaybackGeneration++;
+            Raise(position, new TextRange(position, 0));
+        }
 
         private void Raise(int position, TextRange spokenRange) =>
             PlaybackChanged?.Invoke(this, new ReaderChangedEventArgs(

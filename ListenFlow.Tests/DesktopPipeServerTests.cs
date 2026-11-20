@@ -53,6 +53,7 @@ public sealed class DesktopPipeServerTests
 
     private sealed class PipeTestTarget : IRemotePlaybackTarget
     {
+        public event EventHandler? LocalPlaybackStarting { add { } remove { } }
         public event EventHandler<ReaderChangedEventArgs>? PlaybackChanged;
         public int StartCount { get; private set; }
         public int TextLength => Text.Length;

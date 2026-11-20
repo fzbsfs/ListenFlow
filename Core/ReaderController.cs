@@ -155,6 +155,66 @@ public sealed class ReaderController : IDisposable
         ResumeCore();
     });
 
+    public void SelectVoice(string name) => Invoke(() =>
+    {
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("语音名称不能为空。", nameof(name));
+        if (!_speech.Voices.Any(voice => voice.Enabled && !voice.IsKnownOnline &&
+                string.Equals(voice.Name, name, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("指定的本地语音不存在或未启用：" + name);
+        if (string.Equals(_speech.SelectedVoiceName, name, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var previousState = _state;
+        var previousVoiceName = _speech.SelectedVoiceName;
+        if (!CancelCurrentSession("切换本地语音"))
+            throw new InvalidOperationException(_errorMessage ?? "切换语音前无法安全停止当前朗读。");
+
+        try
+        {
+            _speech.SelectVoice(name);
+        }
+        catch (Exception exception)
+        {
+            Exception? restoreError = null;
+            if (!string.IsNullOrWhiteSpace(previousVoiceName))
+            {
+                try { _speech.SelectVoice(previousVoiceName); }
+                catch (Exception restoreException) { restoreError = restoreException; }
+            }
+            else
+            {
+                restoreError = new InvalidOperationException("没有可恢复的原语音。");
+            }
+
+            if (restoreError is not null)
+            {
+                var message = "切换语音失败且无法恢复原语音：" + restoreError.Message;
+                Fail(message, cancelPlayback: false);
+                throw new InvalidOperationException(message, exception);
+            }
+
+            _nextChunkIndex = FindChunkIndex(_position);
+            _state = previousState;
+            if (_state == PlaybackState.Speaking)
+                FillQueue();
+            if (_state != PlaybackState.Error)
+                RaiseChanged();
+
+            throw new InvalidOperationException("切换本地语音失败：" + exception.Message, exception);
+        }
+
+        _nextChunkIndex = FindChunkIndex(_position);
+        _spokenRange = new TextRange(_position, 0);
+        _errorMessage = null;
+        _state = previousState;
+        if (_state == PlaybackState.Speaking)
+            FillQueue();
+        if (_state != PlaybackState.Error)
+            RaiseChanged();
+    });
+
     public void Stop() => Invoke(() =>
     {
         ThrowIfDisposed();

@@ -66,6 +66,14 @@
     return snapshot;
   }
 
+  function buildElementSnapshot(element, includeCode = false) {
+    if (!element || !element.isConnected) throw new Error("回复已从网页移除，请重新选择。");
+    const nodes = readableTextNodes(element).filter(node => includeCode || !node.parentElement?.closest("pre"));
+    const snapshot = buildSnapshotFromNodes(nodes, "ai-reply", element, "ai-reply");
+    snapshot.title = "人工智能回复";
+    return snapshot;
+  }
+
   function buildSnapshotFromNodes(nodes, source, root, extraction) {
     const slices = nodes.map(node => ({ node, start: 0, end: node.data.length }));
     const snapshot = buildSnapshotFromSlices(slices, source, root, document.title);
@@ -333,6 +341,7 @@
     buildSelectionSnapshot,
     buildArticleSnapshot,
     buildPageSnapshot,
+    buildElementSnapshot,
     locatePoint,
     resolveReadingTarget,
     isEditableTargetAllowed,

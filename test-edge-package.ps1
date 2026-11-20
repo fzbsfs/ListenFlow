@@ -118,12 +118,12 @@ try {
         throw "旧版阅读历史没有迁移到统一数据目录。"
     }
     $installation = Get-Content -LiteralPath (Join-Path $installRoot "installation.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ([string]$installation.version -ne "0.2.2" -or [IO.Path]::GetFullPath([string]$installation.dataRoot) -ne [IO.Path]::GetFullPath($dataRoot)) {
+    if ([string]$installation.version -ne "0.2.4" -or [IO.Path]::GetFullPath([string]$installation.dataRoot) -ne [IO.Path]::GetFullPath($dataRoot)) {
         throw "安装元数据版本或数据目录不正确。"
     }
     $manifest = Get-Content -LiteralPath $extensionManifest -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ([string]$manifest.version -ne "0.2.2") {
-        throw "安装的 Edge 扩展不是 0.2.2。"
+    if ([string]$manifest.version -ne "0.2.4") {
+        throw "安装的 Edge 扩展不是 0.2.4。"
     }
 
     Write-Host "[2/6] 验证扩展、宿主清单与注册路径"

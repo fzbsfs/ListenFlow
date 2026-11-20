@@ -4,7 +4,7 @@ namespace ListenFlow.Speech;
 
 public sealed class SapiSpeechService : ISpeechService
 {
-    private readonly SpeechSynthesizer _synthesizer = new();
+    private SpeechSynthesizer _synthesizer = new();
     private readonly Dictionary<Prompt, Guid> _promptIds = [];
     private readonly HashSet<Guid> _progressedPromptIds = [];
     private readonly SynchronizationContext? _callbackContext;
@@ -23,17 +23,7 @@ public sealed class SapiSpeechService : ISpeechService
             _synthesizer.SpeakStarted += OnSpeakStarted;
             _synthesizer.SpeakProgress += OnSpeakProgress;
             _synthesizer.SpeakCompleted += OnSpeakCompleted;
-            Voices = _synthesizer.GetInstalledVoices()
-                .Select(voice => new LocalVoice(
-                    voice.VoiceInfo.Name,
-                    voice.VoiceInfo.Culture.Name,
-                    voice.Enabled))
-                .GroupBy(voice => voice.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group
-                    .OrderByDescending(voice => voice.Enabled)
-                    .ThenBy(voice => voice.Culture, StringComparer.OrdinalIgnoreCase)
-                    .First())
-                .ToArray();
+            Voices = EnumerateVoices(_synthesizer);
         }
         catch
         {
@@ -45,12 +35,54 @@ public sealed class SapiSpeechService : ISpeechService
     public event EventHandler<SpeechProgressEventArgs>? Progressed;
     public event EventHandler<SpeechCompletedEventArgs>? Completed;
 
-    public IReadOnlyList<LocalVoice> Voices { get; }
+    public IReadOnlyList<LocalVoice> Voices { get; private set; }
     public string? SelectedVoiceName => _disposed ? null : _synthesizer.Voice?.Name;
+
+    public IReadOnlyList<LocalVoice> RefreshVoices()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_synthesizer.State != SynthesizerState.Ready)
+            throw new InvalidOperationException("请停止正文朗读后再刷新语音列表。");
+        var selectedName = SelectedVoiceName;
+        var replacement = new SpeechSynthesizer();
+        IReadOnlyList<LocalVoice> voices;
+        try
+        {
+            replacement.SetOutputToDefaultAudioDevice();
+            voices = EnumerateVoices(replacement);
+            if (!string.IsNullOrWhiteSpace(selectedName) && voices.Any(voice => voice.Enabled && !voice.IsKnownOnline &&
+                    string.Equals(voice.Name, selectedName, StringComparison.OrdinalIgnoreCase)))
+                replacement.SelectVoice(selectedName);
+        }
+        catch { replacement.Dispose(); throw; }
+        replacement.SpeakStarted += OnSpeakStarted;
+        replacement.SpeakProgress += OnSpeakProgress;
+        replacement.SpeakCompleted += OnSpeakCompleted;
+        var previous = _synthesizer;
+        previous.SpeakStarted -= OnSpeakStarted;
+        previous.SpeakProgress -= OnSpeakProgress;
+        previous.SpeakCompleted -= OnSpeakCompleted;
+        _synthesizer = replacement;
+        Voices = voices;
+        lock (_promptIds) { _promptIds.Clear(); _progressedPromptIds.Clear(); }
+        previous.Dispose();
+        return Voices;
+    }
+
+    private static IReadOnlyList<LocalVoice> EnumerateVoices(SpeechSynthesizer synthesizer) =>
+        LocalVoice.Coalesce(synthesizer.GetInstalledVoices()
+            .Select(voice => new LocalVoice(
+                voice.VoiceInfo.Name,
+                voice.VoiceInfo.Culture.Name,
+                voice.Enabled,
+                voice.VoiceInfo.Id)));
 
     public void SelectVoice(string name)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!Voices.Any(voice => voice.Enabled && !voice.IsKnownOnline &&
+                string.Equals(voice.Name, name, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("所选语音不存在、未启用或已识别为在线语音。");
         _synthesizer.SelectVoice(name);
     }
 
@@ -59,11 +91,15 @@ public sealed class SapiSpeechService : ISpeechService
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (string.IsNullOrWhiteSpace(text))
             throw new ArgumentException("朗读内容不能为空。", nameof(text));
+        if (!Voices.Any(voice => voice.Enabled && !voice.IsKnownOnline &&
+                string.Equals(voice.Name, SelectedVoiceName, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("当前语音不可用或已识别为在线语音，请选择已启用的本地语音。");
 
         _synthesizer.Rate = Math.Clamp(rate, -10, 10);
         _synthesizer.Volume = 100;
         var id = Guid.NewGuid();
-        var prompt = new Prompt(text);
+        var preparedText = SapiTextPreparer.Prepare(text);
+        var prompt = new Prompt(preparedText);
         lock (_promptIds)
             _promptIds[prompt] = id;
         try
@@ -73,6 +109,7 @@ public sealed class SapiSpeechService : ISpeechService
             {
                 ["promptId"] = id,
                 ["textLength"] = text.Length,
+                ["inputAdjusted"] = !ReferenceEquals(preparedText, text),
                 ["rate"] = _synthesizer.Rate,
                 ["voiceName"] = SelectedVoiceName
             });
@@ -102,9 +139,9 @@ public sealed class SapiSpeechService : ISpeechService
     public void CancelAll()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        _synthesizer.SpeakAsyncCancelAll();
         if (_synthesizer.State == SynthesizerState.Paused)
             _synthesizer.Resume();
-        _synthesizer.SpeakAsyncCancelAll();
     }
 
     public void Dispose()
@@ -116,9 +153,9 @@ public sealed class SapiSpeechService : ISpeechService
         _synthesizer.SpeakCompleted -= OnSpeakCompleted;
         try
         {
+            _synthesizer.SpeakAsyncCancelAll();
             if (_synthesizer.State == SynthesizerState.Paused)
                 _synthesizer.Resume();
-            _synthesizer.SpeakAsyncCancelAll();
         }
         catch
         {

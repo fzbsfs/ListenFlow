@@ -29,3 +29,28 @@
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
   pointer-events: none;
 }
+
+.listenflow-ai-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2147483645;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(480px, calc(100vw - 24px));
+  padding: 8px;
+  background: #202020;
+  color: white;
+  border-radius: 8px;
+  font: 13px sans-serif;
+}
+
+.listenflow-ai-panel button, .listenflow-ai-read {
+  padding: 4px 8px;
+  border: 1px solid #777;
+  border-radius: 5px;
+  background: #292929;
+  color: white;
+  cursor: pointer;
+}
