@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$version = '0.2.2'
-$expectedHash = 'ED46DC3E843206D531FC4E24A19C880C24AA421CBA3C6D8059CD82E5CFF3CB84'
+$version = '0.2.4'
+$expectedHash = '75EDF44F693AB5515DEAC5F3B5C80A806FBE61DA199699854C78414BC264A3BB'
 $downloadUri = "https://github.com/fzbsfs/ListenFlow/releases/download/v$version/ListenFlow-$version-Windows-x64.zip"
 $cacheRoot = Join-Path $env:TEMP "ListenFlow-setup-$version"
 New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
