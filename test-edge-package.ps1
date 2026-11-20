@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$PackageDirectory = (Join-Path $PSScriptRoot "artifacts\latest"),
     [string]$DotNetPath
