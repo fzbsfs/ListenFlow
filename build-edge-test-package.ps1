@@ -77,7 +77,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $hostPublish "ListenFlow.NativeHost.exe") -Destination $payloadApp
 
     Write-Host "[5/7] 复制离线 Edge 扩展与安装工具"
-    $extensionManifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot "EdgeExtension\manifest.json") -Raw | ConvertFrom-Json
+    $extensionManifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot "EdgeExtension\manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     if ([string]$extensionManifest.version -ne $productVersion) {
         throw "扩展版本与构建版本不一致：$($extensionManifest.version) != $productVersion"
     }
