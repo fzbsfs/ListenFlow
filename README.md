@@ -1,6 +1,37 @@
 # ListenFlow 本地听读助手
 
+![Version](https://img.shields.io/badge/version-0.2.4-E85D2A?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-1E1A18?style=flat-square)
+![Offline](https://img.shields.io/badge/speech-100%25%20本地离线-D97706?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-4B5563?style=flat-square)
+
 ListenFlow 是面向 Windows 的本地长文本听读工具。程序使用系统已安装、可由 SAPI 访问的语音，不接入在线语音、云端人工智能、在线文字识别、账号、遥测或云同步。
+
+## 界面预览
+
+采用暖橘黄 / 朱红漫画票根风（G2）桌面界面：顶部漫画导航栏 + 票根播放台，左侧安静米白阅读纸面与句级高亮，右侧待听队列与可互动看板娘，兼顾可读性与陪伴感。
+
+<p align="center">
+  <img src="docs/images/ui-main-playing.png" alt="ListenFlow 0.2.4 主界面（G2 漫画票根风与交互看板娘）" width="920" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/images/ui-mascot-interact.png" alt="交互式看板娘摸头与气泡反馈" width="100%" /><br />
+      <sub><b>交互式看板娘</b> · 支持摸头 / 点击互动、跟随朗读状态切换表情与气泡</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/images/ui-settings-voice.png" alt="听读与本地语音设置弹层" width="100%" /><br />
+      <sub><b>听读与语音设置</b> · 本机 SAPI 语音切换、独立试听、字号语速与剪贴板插播</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/ui-floating-bar.png" alt="漫画风悬浮控制条" width="404" /><br />
+  <sub><b>悬浮控制条</b> · 跨窗口听读时置顶轻控播放、切句与语速</sub>
+</p>
 
 ## 下载安装
 
