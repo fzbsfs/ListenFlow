@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$CdpEndpoint,
     [string]$PageUrl = "http://127.0.0.1:8765/",

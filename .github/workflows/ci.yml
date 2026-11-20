@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+
+jobs:
+  powershell-scripts:
+    name: PowerShell 5.1 BOM & Parse Check
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify UTF-8 BOM and Windows PowerShell 5.1 AST parsing
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $files = @(git ls-files "*.ps1")
+          if ($files.Count -eq 0) {
+            throw "No tracked .ps1 files found."
+          }
+
+          $failed = $false
+          foreach ($file in $files) {
+            $fullPath = (Resolve-Path -LiteralPath $file).Path
+            $bytes = [IO.File]::ReadAllBytes($fullPath)
+            $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($fullPath, [ref]$tokens, [ref]$parseErrors)
+            $errCount = if ($parseErrors) { $parseErrors.Count } else { 0 }
+
+            Write-Host ("{0,-44} BOM={1,-5} ParseErrors={2}" -f $file, $hasBom, $errCount)
+            if (-not $hasBom) {
+              Write-Error "Missing UTF-8 BOM: $file" -ErrorAction Continue
+              $failed = $true
+            }
+            if ($errCount -gt 0) {
+              foreach ($err in $parseErrors) {
+                Write-Error ("{0}:{1}: {2}" -f $file, $err.Extent.StartLineNumber, $err.Message) -ErrorAction Continue
+              }
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            exit 1
+          }
+
+  edge-extension:
+    name: Edge Extension Tests & Validation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run test-edge-extension.ps1 (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .\test-edge-extension.ps1
+
+  dotnet-tests:
+    name: .NET 10 Build & Automated Tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore test and probe projects
+        shell: pwsh
+        run: |
+          dotnet restore ListenFlow.Tests/ListenFlow.Tests.csproj --nologo
+          dotnet restore ListenFlow.CommunicationProbe/ListenFlow.CommunicationProbe.csproj --nologo
+
+      - name: Build Release (App, NativeHost, Protocol, Probe, Tests)
+        shell: pwsh
+        run: |
+          dotnet build ListenFlow.Tests/ListenFlow.Tests.csproj -c Release --no-restore --nologo
+          dotnet build ListenFlow.CommunicationProbe/ListenFlow.CommunicationProbe.csproj -c Release --no-restore --nologo
+
+      - name: Run automated xUnit tests (excluding local SAPI voice integration)
+        shell: pwsh
+        run: |
+          dotnet test ListenFlow.Tests/ListenFlow.Tests.csproj `
+            -c Release `
+            --no-build `
+            --no-restore `
+            --filter "类别!=本机语音集成" `
+            --verbosity normal `
+            --logger "trx;LogFileName=test-results.trx" `
+            --results-directory TestResults
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore

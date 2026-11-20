@@ -1,6 +1,7 @@
 # ListenFlow 本地听读助手
 
 ![Version](https://img.shields.io/badge/version-0.2.4-E85D2A?style=flat-square)
+[![CI](https://github.com/fzbsfs/ListenFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/fzbsfs/ListenFlow/actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-1E1A18?style=flat-square)
 ![Offline](https://img.shields.io/badge/speech-100%25%20本地离线-D97706?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-4B5563?style=flat-square)

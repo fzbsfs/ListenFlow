@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$HostExecutable
@@ -20,7 +20,8 @@ $manifest = [ordered]@{
     type = "stdio"
     allowed_origins = @("chrome-extension://chdkljcgemgeljdnfdnblbelfhmkkfbp/")
 }
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+$utf8NoBom = New-Object Text.UTF8Encoding($false)
+[IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 4), $utf8NoBom)
 
 $registryPath = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.listenflow.native_host"
 New-Item -Path $registryPath -Force | Out-Null

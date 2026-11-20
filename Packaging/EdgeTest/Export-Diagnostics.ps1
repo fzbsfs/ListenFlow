@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$DataRoot = (Join-Path $env:LOCALAPPDATA "ListenFlow"),
     [string]$OutputDirectory = [Environment]::GetFolderPath("Desktop")
