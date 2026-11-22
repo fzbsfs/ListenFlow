@@ -365,7 +365,7 @@ internal sealed class ComicQueuePanel : Control
             menu.Items.Add("从待听队列移除", null, (_, _) => QueuedItemRemoveRequested?.Invoke(this, idx));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开待听队列管理…", null, (_, _) => ManageQueueRequested?.Invoke(this, EventArgs.Empty));
-            menu.Closed += (_, _) => menu.Dispose();
+            ComicTheme.DisposeOnClose(menu, this);
             menu.Show(this, e.Location);
             return;
         }

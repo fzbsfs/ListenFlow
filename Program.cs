@@ -40,6 +40,7 @@ internal static class Program
                 AppLog.WriteException("未处理异常", exception);
         };
 
+        var started = false;
         try
         {
             using var form = new MainForm();
@@ -47,6 +48,7 @@ internal static class Program
             DesktopPipeServer? pipeServer = null;
             form.Shown += (_, _) =>
             {
+                started = true;
                 var context = SynchronizationContext.Current
                               ?? throw new InvalidOperationException("未取得桌面状态线程。");
                 router = new DesktopCommandRouter(form, context, AppLog.WriteEvent);
@@ -67,10 +69,13 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            AppLog.WriteException("启动失败", exception);
+            var stage = started ? "运行异常退出" : "启动失败";
+            AppLog.WriteException(stage, exception);
             MessageBox.Show(
-                "ListenFlow 启动失败，详细信息已写入本地日志。\n\n" + exception.Message,
-                "ListenFlow 启动失败",
+                (started
+                    ? "ListenFlow 运行时遇到未处理异常，详细信息已写入本地日志。\n\n"
+                    : "ListenFlow 启动失败，详细信息已写入本地日志。\n\n") + exception.Message,
+                started ? "ListenFlow 运行异常" : "ListenFlow 启动失败",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }

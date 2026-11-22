@@ -116,6 +116,47 @@ public sealed class ComicUiVerificationTests
         if (failure is not null) throw new InvalidOperationException("G2 界面验证失败。", failure);
     }
 
+    [Fact]
+    public void 临时右键菜单关闭后延迟释放_不触发ObjectDisposedException()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var form = new Form
+                {
+                    StartPosition = FormStartPosition.Manual,
+                    Location = new Point(-2400, -2400),
+                    Size = new Size(320, 200)
+                };
+                form.Show();
+                Application.DoEvents();
+
+                var menu = new ContextMenuStrip();
+                ComicTheme.StyleContextMenu(menu);
+                menu.Items.Add("测试菜单项");
+                ComicTheme.DisposeOnClose(menu, form);
+
+                menu.Show(form, new Point(10, 10));
+                Application.DoEvents();
+                Assert.False(menu.IsDisposed);
+
+                menu.Close(ToolStripDropDownCloseReason.AppClicked);
+                Assert.False(menu.IsDisposed);
+
+                Pump(4);
+                Assert.True(menu.IsDisposed);
+                form.Close();
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "右键菜单关闭释放测试超时。");
+        if (failure is not null) throw new InvalidOperationException("右键菜单关闭释放测试失败。", failure);
+    }
+
     private static void Pump(int rounds)
     {
         for (var i = 0; i < rounds; i++)

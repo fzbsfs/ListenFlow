@@ -201,6 +201,53 @@ internal static class ComicTheme
         menu.Renderer = new ComicToolStripRenderer();
     }
 
+    public static void DisposeOnClose(ContextMenuStrip menu, Control owner)
+    {
+        EventHandler? onOwnerDisposed = null;
+        onOwnerDisposed = (_, _) =>
+        {
+            if (!menu.IsDisposed) menu.Dispose();
+        };
+        owner.Disposed += onOwnerDisposed;
+        menu.Disposed += (_, _) => owner.Disposed -= onOwnerDisposed;
+
+        var scheduled = false;
+        menu.Closed += (_, _) =>
+        {
+            if (scheduled || menu.IsDisposed) return;
+            scheduled = true;
+
+            void DisposeDeferred()
+            {
+                if (!menu.IsDisposed) menu.Dispose();
+            }
+
+            if (!owner.IsDisposed && owner.IsHandleCreated)
+            {
+                try
+                {
+                    owner.BeginInvoke((Action)DisposeDeferred);
+                    return;
+                }
+                catch (ObjectDisposedException) { }
+                catch (InvalidOperationException) { }
+            }
+
+            if (!menu.IsDisposed && menu.IsHandleCreated)
+            {
+                try
+                {
+                    menu.BeginInvoke((Action)DisposeDeferred);
+                    return;
+                }
+                catch (ObjectDisposedException) { }
+                catch (InvalidOperationException) { }
+            }
+
+            DisposeDeferred();
+        };
+    }
+
     private sealed class ComicToolStripRenderer : ToolStripProfessionalRenderer
     {
         public ComicToolStripRenderer() : base(new ComicColorTable()) { }

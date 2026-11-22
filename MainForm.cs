@@ -793,7 +793,7 @@ internal sealed partial class MainForm : Form, IRemotePlaybackTarget
         menu.Items.Add("重听当前句", null, (_, _) => RepeatCurrentSentence()).Enabled =
             _reader is not null && !string.IsNullOrWhiteSpace(_editor.Text);
         menu.Items.Add("返回插播前文章", null, (_, _) => RestoreInterruptedArticle()).Enabled = _returnArticle is not null;
-        menu.Closed += (_, _) => menu.Dispose();
+        ListenFlow.UI.ComicTheme.DisposeOnClose(menu, _floating);
         menu.Show(_floating, new Point(0, _floating.ClientSize.Height));
     }
 

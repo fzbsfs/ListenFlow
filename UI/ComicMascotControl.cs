@@ -677,7 +677,7 @@ internal sealed class ComicMascotControl : Control
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("🎛 打开悬浮控制条", null, (_, _) => FloatingControlsRequested?.Invoke(this, EventArgs.Empty));
         menu.Items.Add("🙈 暂时收起看板娘", null, (_, _) => HideMascotRequested?.Invoke(this, EventArgs.Empty));
-        menu.Closed += (_, _) => menu.Dispose();
+        ComicTheme.DisposeOnClose(menu, this);
         menu.Show(this, pt);
     }
 
